@@ -1,0 +1,12 @@
+{
+  "start": "2018-01-01",
+  "end": "2026-09-01",
+  "benchmark": "XIC.TO",
+  "initial_capital": 100000,
+  "risk_free_rate": 0.03,
+  "transaction_cost_bps": 10,
+  "warmup_days": 252,
+  "forecast_days": 20,
+  "test_fraction": 0.2,
+  "seed": 42
+}

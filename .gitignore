@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+.pytest_cache/
+output/*.db
+output/*.log
+output/desktop-report.png
+output/mobile-report.png
+output/model_coefficients.csv
+output/model_predictions.csv
+output/portfolio_daily_summary.csv
+output/portfolio_positions.csv
+output/rebalancing_history.csv
+output/sector_exposures.csv
+output/securities.csv
+output/security_daily_analytics.csv
+.ipynb_checkpoints/

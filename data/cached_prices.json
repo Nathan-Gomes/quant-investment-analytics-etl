@@ -1,0 +1,8 @@
+{
+  "source": "Yahoo Finance via yfinance",
+  "retrieved_at": "2026-09-09T05:52:46.940726+00:00",
+  "sha256": "b44f2f6710ea5c813e3c598cd6594adab2596f9a5bf8c00f4734f6ccca092bb4",
+  "start": "2018-01-01",
+  "end_exclusive": "2026-09-01",
+  "price_basis": "Dividend/split adjusted close; CAD"
+}
