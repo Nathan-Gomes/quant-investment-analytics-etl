@@ -14,3 +14,5 @@ output/sector_exposures.csv
 output/securities.csv
 output/security_daily_analytics.csv
 .ipynb_checkpoints/
+data/synthetic_prices.csv
+data/synthetic_prices.json
