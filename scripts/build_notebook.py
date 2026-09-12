@@ -19,7 +19,12 @@ nb.cells = [
     nbf.v4.new_code_cell("scores = pd.read_sql('SELECT * FROM model_scores', conn)\ndisplay(scores[['portfolio_id', 'model', 'rmse', 'r2', 'selected_by_cv']])\nscores.pivot(index='portfolio_id', columns='model', values='rmse').plot.bar(figsize=(12, 5))\nplt.title('Held-out volatility prediction RMSE: lower is better')\nplt.xticks(rotation=0)\nplt.tight_layout()\nplt.show()\ndisplay(pd.read_sql('SELECT * FROM validation_splits', conn))"),
     nbf.v4.new_markdown_cell("## Implementation\nThe following cells display the actual pipeline source used to generate these results."),
 ]
-for name in ("extract", "validation", "analytics", "models", "load", "pipeline"):
+nb.cells[4:4] = [
+    nbf.v4.new_markdown_cell("## History and five-year scenarios\nThe historical backtest ends before any simulated return. All portfolios and XIC share sampled 20-session blocks. Scenario medians are conditional on the historical sample; strong past growth is carried forward, not independently forecast. The normalized chart removes unequal starting NAV. Ranges omit parameter uncertainty and unseen regimes. The horizon is exactly five calendar years with 252 modeled steps per year, not exchange calendar dates."),
+    nbf.v4.new_code_cell("from IPython.display import Image\nfor filename in ['forward_scenarios.png', 'forward_indexed.png', 'forward_ranges.png']:\n    display(Image(filename=str(ROOT / 'output' / filename)))\ndisplay(pd.read_sql('SELECT * FROM forward_projection_summary', conn))"),
+    nbf.v4.new_markdown_cell("## Backtesting and look-ahead controls\nReturns use previous-close weights; low-volatility targets use only the initial calibration window. Later prices cannot affect earlier weights. Regression labels are purged at chronological split boundaries and scaling stays within training folds. These timing controls do not remove retrospectively chosen securities, manual allocations or survivorship bias. Five-year scenarios use completed history at the final as-of date, never feed into earlier decisions, and have not been validated as five-year forecasts."),
+]
+for name in ("extract", "validation", "analytics", "forward", "models", "load", "pipeline"):
     source = (root / "src" / f"{name}.py").read_text()
     nb.cells.append(nbf.v4.new_markdown_cell(f"### {name}.py\n```python\n{source}\n```"))
 nb.cells.append(nbf.v4.new_code_cell("conn.close()"))

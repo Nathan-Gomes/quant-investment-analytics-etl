@@ -1,5 +1,15 @@
 # Quantitative Investment Analytics ETL Pipeline
 
+## Five-year conditional scenarios
+
+The historical chart continues from its last NAV into pointwise median scenarios. A second chart rebases all portfolios to 100 at the projection date; separate panels show 25th-75th and 5th-95th percentile ranges on identical scales. Colors match the original historical notebook. XIC is included in both comparisons.
+
+The engine samples the same complete 20-session historical blocks across all portfolios, preserving contemporaneous dependence. It compounds 1,260 modeled returns over exactly five calendar years, including starting NAV as the initial drawdown peak. Dates are model coordinates rather than an exchange calendar. Sampled net returns retain historical costs; future holdings and trading costs are not recomputed. CSV tables and SQLite retain the bands and summary. A fixed seed makes the run reproducible.
+
+These scenarios repeat the sample's return distribution, including its strong growth. They are not independently estimated expected returns, validated five-year forecasts, or guarantees. Parameter uncertainty, unobserved regimes, taxes and inflation are omitted. Medians at successive dates are not one investable path.
+
+Look-ahead controls apply to backtest timing and regression validation: previous-close weights, pre-investment inverse-volatility calibration, chronological folds, purged forward labels and training-only scaling. Today's security universe and manually selected policies still create selection and survivorship bias; the research does not claim an entirely unbiased backtest. Scenario information never enters prior historical decisions.
+
 [Live case study](https://www.nathan-gomes.com/Project-Investment-Analytics.dc.html) · [Interactive report](https://www.nathan-gomes.com/investment-analytics/output/report.html) · [Executed notebook](https://www.nathan-gomes.com/investment-analytics/output/notebook.html)
 
 A reproducible Python, pandas and SQL research pipeline that compares four Canadian equity allocations against XIC, models transaction costs, and evaluates next-period volatility forecasts without leaking future data into training.

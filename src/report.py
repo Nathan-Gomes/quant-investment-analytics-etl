@@ -1,47 +1,14 @@
 import html
 import json
 
-import matplotlib
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 
 
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
+from .scenario_charts import comparison, previews, PALETTE
 
 
 COLORS = ["#177565", "#386cb0", "#b44955", "#8969a9", "#646e72"]
-
-
-def transparent(hex_color, alpha=0.13):
-    red, green, blue = (int(hex_color[index:index + 2], 16) for index in (1, 3, 5))
-    return f"rgba({red}, {green}, {blue}, {alpha})"
-
-
-def write_forward_preview(output, daily, projection):
-    """Write a static counterpart for the case-study page."""
-    fig, axis = plt.subplots(figsize=(15, 6.5), dpi=180)
-    portfolio_ids = [name for name in daily.portfolio_id.unique() if name != "Benchmark"]
-    for index, portfolio_id in enumerate(portfolio_ids):
-        color = COLORS[index]
-        history = daily[daily.portfolio_id == portfolio_id]
-        future = projection[projection.portfolio_id == portfolio_id]
-        axis.plot(history.date, history.nav, color=color, linewidth=1.8, label=f"{portfolio_id} actual")
-        axis.fill_between(future.date, future.p05, future.p95, color=color, alpha=0.13)
-        axis.plot(future.date, future["median"], color=color, linewidth=1.8, linestyle="--",
-                  label=f"{portfolio_id} median")
-    projection_start = projection.date.min()
-    axis.axvline(projection_start, color="#69777e", linewidth=1, linestyle=":")
-    axis.annotate("Five-year scenarios begin", xy=(projection_start, axis.get_ylim()[1]), xytext=(8, -10),
-                  textcoords="offset points", color="#536167", fontsize=10, va="top")
-    axis.set_title("Historical portfolio value and five-year scenario range", fontsize=16, weight="bold", pad=14)
-    axis.set_ylabel("CAD")
-    axis.grid(alpha=0.22)
-    axis.legend(ncol=4, fontsize=8.5, loc="upper left", frameon=True)
-    fig.tight_layout()
-    fig.savefig(output / "forward_scenarios.png", bbox_inches="tight", facecolor="white")
-    plt.close(fig)
 
 
 def figures(tables):
@@ -50,31 +17,14 @@ def figures(tables):
     latest = sectors[sectors.date == sectors.date.max()]
     latest = latest[latest.portfolio_id != "Benchmark"]
     charts = {
-        "performance": px.line(daily, x="date", y="nav", color="portfolio_id", render_mode="svg", title=f"Portfolio value<br><sup>CAD {daily.nav.iloc[0]:,.0f} initial capital</sup>", color_discrete_sequence=COLORS),
-        "drawdown": px.line(daily, x="date", y="drawdown", color="portfolio_id", render_mode="svg", title="Loss from previous peak", color_discrete_sequence=COLORS),
+        "performance": px.line(daily, x="date", y="nav", color="portfolio_id", render_mode="svg", color_discrete_map=PALETTE, title=f"Portfolio value<br><sup>CAD {daily.nav.iloc[0]:,.0f} initial capital</sup>", color_discrete_sequence=COLORS),
+        "drawdown": px.line(daily, x="date", y="drawdown", color="portfolio_id", render_mode="svg", color_discrete_map=PALETTE, title="Loss from previous peak", color_discrete_sequence=COLORS),
         "risk": px.scatter(summary, x="volatility", y="annualized_return", color="portfolio_id", size=[18] * len(summary), title="Annualized risk and return", color_discrete_sequence=COLORS),
         "sectors": px.bar(latest, x="portfolio_id", y="weight", color="sector", title="Latest sector exposure", color_discrete_sequence=COLORS),
     }
     projection = tables["forward_projection_bands"]
-    projected_chart = go.Figure()
-    portfolio_ids = [name for name in daily.portfolio_id.unique() if name != "Benchmark"]
-    for index, portfolio_id in enumerate(portfolio_ids):
-        color = COLORS[index]
-        history = daily[daily.portfolio_id == portfolio_id]
-        future = projection[projection.portfolio_id == portfolio_id]
-        projected_chart.add_trace(go.Scatter(x=history.date, y=history.nav, mode="lines", name=f"{portfolio_id} actual",
-                                             line=dict(color=color, width=2)))
-        projected_chart.add_trace(go.Scatter(x=list(future.date) + list(future.date[::-1]),
-                                             y=list(future.p95) + list(future.p05[::-1]), fill="toself",
-                                             fillcolor=transparent(color), line=dict(color="rgba(0,0,0,0)"),
-                                             hoverinfo="skip", showlegend=False, name=f"{portfolio_id} 5-95% range"))
-        projected_chart.add_trace(go.Scatter(x=future.date, y=future["median"], mode="lines", name=f"{portfolio_id} median projection",
-                                             line=dict(color=color, width=2, dash="dash")))
-    projected_chart.add_vline(x=projection.date.min(), line_width=1, line_dash="dot", line_color="#646e72")
-    projected_chart.add_annotation(x=projection.date.min(), y=1.02, yref="paper", text="Projection begins", showarrow=False,
-                                   xanchor="left", font=dict(color="#55636b"))
-    projected_chart.update_layout(title="Historical portfolio value and five-year scenario range<br><sup>Solid: completed backtest · Dashed: median simulation · Shaded: 5th-95th percentile</sup>")
-    charts["forward_scenarios"] = projected_chart
+    charts["forward_scenarios"] = comparison(daily, projection)
+    charts["forward_indexed"] = comparison(daily, projection, normalized=True)
     returns = daily.pivot(index="date", columns="portfolio_id", values="net_return").iloc[1:]
     charts["correlation"] = px.imshow(returns.corr(), zmin=-1, zmax=1, color_continuous_scale="RdBu", text_auto=".2f", title="Portfolio return correlation", aspect="auto")
     scores = tables["model_scores"]
@@ -97,12 +47,12 @@ def figures(tables):
         if key == "forecasts":
             chart.update_layout(height=1100, legend=dict(y=-0.07))
         charts[key] = chart
-    return charts
+    return {key: charts[key] for key in ("performance", "drawdown", "forward_scenarios", "forward_indexed", "risk", "sectors", "correlation", "forecasts", "model_error")}
 
 
 def render_report(output, tables, provenance, config, quality):
     charts = figures(tables)
-    write_forward_preview(output, tables["portfolio_daily_summary"], tables["forward_projection_bands"])
+    previews(output, tables["portfolio_daily_summary"], tables["forward_projection_bands"])
     summary = tables["portfolio_summary"].copy()
     for col in ["cumulative_return", "annualized_return", "volatility", "max_drawdown", "excess_annualized_return"]:
         summary[col] = summary[col].map(lambda value: f"{value:.2%}")
@@ -124,6 +74,7 @@ def render_report(output, tables, provenance, config, quality):
                                 "Median terminal value", "95th percentile terminal value", "Probability of loss after horizon",
                                 "Median maximum drawdown", "Paths", "Years", "Block days"]
     panels = "".join(f'<section class="chart" id="{key}">{chart.to_html(full_html=False, include_plotlyjs=True if i == 0 else False, config={"responsive": True, "displaylogo": False})}</section>'
+                     + ('<figure style="margin:24px 0"><img src="forward_ranges.png" alt="Five portfolios on identical index scales, showing median and percentile ranges" style="width:100%;height:auto"><figcaption>Conditional simulation ranges, not guaranteed bounds. Dashed medians are pointwise summaries, not individual simulated paths. Outcomes outside the shaded ranges remain possible.</figcaption></figure>' if key == "forward_indexed" else '')
                      for i, (key, chart) in enumerate(charts.items()))
     daily = tables["portfolio_daily_summary"]
     source = html.escape(provenance["source"])
@@ -137,7 +88,7 @@ th:first-child,td:first-child{{position:sticky;left:0;background:#f5f7f7;z-index
 <h2 id="comparison">Portfolio comparison</h2><p>Growth emphasizes technology. Income emphasizes banks, energy and utilities. Balanced diversifies across these equity sectors. Low volatility uses inverse historical volatility weights. All four remain equity portfolios.</p>
 <div class="table">{summary.to_html(index=False, border=0)}</div>{panels}
 <h2>Five-year scenario analysis</h2><p>The scenario engine begins after the final completed backtest date. It resamples consecutive {config['bootstrap_block_days']}-session blocks of each portfolio's completed net returns, including modeled rebalancing costs, across {config['simulation_paths']:,} paths. This preserves some short-run return clustering while showing a distribution of plausible outcomes rather than a single expected-value promise.</p>
-<p>These are conditional historical scenarios, not price targets or investment advice. They use no returns after the projection start date and do not claim the historical sample will repeat.</p>
+<p>These are conditional historical scenarios. All portfolios and XIC use the same sampled 20-session periods. The chart includes the initial value and ends exactly five calendar years later; 252 modeled sessions per year are mapped to that horizon, not to an exchange holiday calendar. Resampled net returns carry historical costs; future trades are not recomputed. Strong historical returns and today's selected securities can make projections optimistic. Bands omit parameter uncertainty and unseen market regimes. They use no returns after the projection start date and do not claim the historical sample will repeat.</p>
 <div class="table">{scenario_display.to_html(index=False, border=0)}</div>
 <h2>Forecast validation</h2><p>Models predict the next {config['forecast_days']} sessions' realized annualized volatility. Selection uses training-period cross-validation only. The last {config['test_fraction']:.0%} is held out, with a {config['forecast_days']}-session gap to exclude overlapping training labels. A negative R² means the model is worse than predicting the test mean. Compare RMSE with persistence before concluding that machine learning helps.</p>
 <div class="table">{score_display.to_html(index=False, border=0)}</div>

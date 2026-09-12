@@ -17,24 +17,25 @@ def forward_scenarios(daily, config):
     if paths < 100 or days < 1 or block < 1:
         raise ValueError("Invalid forward-scenario configuration")
 
-    actual = daily[daily.portfolio_id != "Benchmark"].copy()
+    actual = daily.sort_values(["date", "portfolio_id"]).copy()
     returns = actual.pivot(index="date", columns="portfolio_id", values="net_return").iloc[1:]
     starts = actual.groupby("portfolio_id").nav.last()
     if len(returns) < block:
         raise ValueError("Not enough completed return history for the selected bootstrap block")
 
-    dates = pd.bdate_range(returns.index.max() + pd.offsets.BDay(), periods=days)
+    # Map 252 modeled sessions per year to an exact calendar horizon, not an exchange calendar.
+    dates = pd.date_range(returns.index.max(), returns.index.max() + pd.DateOffset(years=int(config["simulation_years"])), periods=days + 1)
+    rng = np.random.default_rng(config["seed"])
+    blocks_needed = int(np.ceil(days / block))
+    block_starts = rng.integers(0, len(returns) - block + 1, size=(paths, blocks_needed))
+    sampled_index = (block_starts[:, :, None] + np.arange(block)).reshape(paths, -1)[:, :days]
     quantiles = [0.05, 0.25, 0.50, 0.75, 0.95]
     bands, summaries = [], []
-    for offset, portfolio_id in enumerate(returns.columns):
-        rng = np.random.default_rng(config["seed"] + offset)
+    for portfolio_id in returns.columns:
         series = returns[portfolio_id].to_numpy(dtype=float)
-        blocks_needed = int(np.ceil(days / block))
-        block_starts = rng.integers(0, len(series), size=(paths, blocks_needed))
-        offsets = np.arange(block)
-        sampled_index = (block_starts[:, :, None] + offsets).reshape(paths, -1) % len(series)
-        sampled_returns = series[sampled_index[:, :days]]
+        sampled_returns = series[sampled_index]
         values = starts[portfolio_id] * np.cumprod(1 + sampled_returns, axis=1)
+        values = np.column_stack([np.full(paths, starts[portfolio_id]), values])
         percentile_values = np.quantile(values, quantiles, axis=0)
         bands.append(pd.DataFrame({
             "date": dates,

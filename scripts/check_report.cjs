@@ -16,7 +16,7 @@ const { pathToFileURL } = require('node:url');
         charts: document.querySelectorAll('.js-plotly-plot').length,
         paths: document.querySelectorAll('.scatterlayer path.js-line').length,
       }));
-      if (result.overflow || result.charts !== 7 || result.paths < 10 || errors.length) {
+      if (result.overflow || result.charts !== 9 || result.paths < 10 || errors.length) {
         throw new Error(JSON.stringify({name, result, errors}));
       }
       await page.screenshot({path: `output/${name}-report.png`, fullPage: true});
