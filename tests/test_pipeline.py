@@ -6,6 +6,7 @@ import pytest
 
 from src.analytics import metrics, portfolio_analytics
 from src.forward import forward_scenarios
+from src.scenario_risk import paired_outcomes, risk_review
 from src.load import load_mart
 from src.models import feature_frame, FEATURES
 from src.validation import clean_inputs, validate_outputs
@@ -127,6 +128,31 @@ def test_shared_scenarios_preserve_identical_returns_and_initial_loss():
     assert (summary.start_value == 100000).all()
     np.testing.assert_allclose(summary.median_max_drawdown, .99 ** 10 - 1)
     assert (summary.probability_terminal_loss == 1).all()
+
+
+def test_paired_tail_is_not_difference_of_marginal_tails():
+    left = np.array([0., 10., 20., 100.])
+    right = left[::-1]
+    result = paired_outcomes(left, right)
+    assert result['probability_underperformance'] == .5
+    assert result['difference_p05'] == pytest.approx(-86.5)
+    assert np.quantile(left, .05) - np.quantile(right, .05) == 0
+
+
+def test_risk_review_reconciles_tail_losses_to_constant_loss_paths():
+    dates = pd.bdate_range('2020-01-01', periods=31)
+    daily = pd.concat([pd.DataFrame({'date': dates, 'portfolio_id': name,
+        'nav': 100000 * .99 ** np.arange(31), 'net_return': [0.] + [-.01] * 30})
+        for name in ['Growth', 'Balanced']])
+    config = dict(seed=42, initial_capital=100000, simulation_years=1,
+                  simulation_paths=100, bootstrap_block_days=5, trading_days=10)
+    downside, sensitivity, paired = risk_review(daily, config)
+    np.testing.assert_allclose(downside.worst5_mean, 100000 * .99 ** 10)
+    assert (downside.terminal_loss_count == 100).all()
+    assert (downside.probability_terminal_loss == 1).all()
+    assert (downside.probability_ever_below_80pct == 0).all()
+    assert (paired.difference_p05 == 0).all()
+    assert (paired.probability_underperformance == 0).all()
 
 
 def test_forecast_label_and_features_use_correct_dates():

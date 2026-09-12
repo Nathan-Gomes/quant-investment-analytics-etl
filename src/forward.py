@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 
 
-def forward_scenarios(daily, config):
+def scenario_paths(daily, config, circular=False):
     """Create deterministic block-bootstrap projections without using future data.
 
     The simulation starts immediately after the final backtest date. Consecutive
@@ -30,15 +30,22 @@ def forward_scenarios(daily, config):
     dates = pd.date_range(returns.index.max(), returns.index.max() + pd.DateOffset(years=int(config["simulation_years"])), periods=days + 1)
     rng = np.random.default_rng(config["seed"])
     blocks_needed = int(np.ceil(days / block))
-    block_starts = rng.integers(0, len(returns) - block + 1, size=(paths, blocks_needed))
+    block_starts = rng.integers(0, len(returns) if circular else len(returns) - block + 1, size=(paths, blocks_needed))
     sampled_index = (block_starts[:, :, None] + np.arange(block)).reshape(paths, -1)[:, :days]
-    quantiles = [0.05, 0.25, 0.50, 0.75, 0.95]
-    bands, summaries = [], []
+    if circular:
+        sampled_index %= len(returns)
     for portfolio_id in returns.columns:
         series = returns[portfolio_id].to_numpy(dtype=float)
         sampled_returns = series[sampled_index]
         values = starts[portfolio_id] * np.cumprod(1 + sampled_returns, axis=1)
         values = np.column_stack([np.full(paths, starts[portfolio_id]), values])
+        yield portfolio_id, dates, values
+
+
+def forward_scenarios(daily, config):
+    quantiles = [0.05, 0.25, 0.50, 0.75, 0.95]
+    bands, summaries = [], []
+    for portfolio_id, dates, values in scenario_paths(daily, config):
         percentile_values = np.quantile(values, quantiles, axis=0)
         bands.append(pd.DataFrame({
             "date": dates,
@@ -53,15 +60,15 @@ def forward_scenarios(daily, config):
         terminal = values[:, -1]
         summaries.append({
             "portfolio_id": portfolio_id,
-            "as_of_date": returns.index.max(),
-            "start_value": starts[portfolio_id],
+            "as_of_date": dates[0],
+            "start_value": config['initial_capital'],
             "terminal_p05": np.quantile(terminal, 0.05),
             "terminal_median": np.quantile(terminal, 0.50),
             "terminal_p95": np.quantile(terminal, 0.95),
-            "probability_terminal_loss": np.mean(terminal < starts[portfolio_id]),
+            "probability_terminal_loss": np.mean(terminal < config['initial_capital']),
             "median_max_drawdown": np.quantile(drawdowns.min(axis=1), 0.50),
-            "scenario_paths": paths,
+            "scenario_paths": config['simulation_paths'],
             "horizon_years": config["simulation_years"],
-            "bootstrap_block_days": block,
+            "bootstrap_block_days": config['bootstrap_block_days'],
         })
     return pd.concat(bands, ignore_index=True), pd.DataFrame(summaries)

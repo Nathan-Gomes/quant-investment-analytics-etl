@@ -13,6 +13,7 @@ import pandas as pd
 from .analytics import portfolio_analytics, security_analytics
 from .extract import extract
 from .forward import forward_scenarios
+from .scenario_risk import risk_review
 from .load import load_mart
 from .models import fit_models
 from .report import render_report
@@ -46,12 +47,14 @@ def run(root, source="cached", config_path=None):
     scores, predictions, coefficients, audits = fit_models(daily, prices, config)
     logging.info("[7/9] Simulating five-year portfolio scenarios from completed history")
     projection_bands, projection_summary = forward_scenarios(daily, config)
+    downside, sensitivity, paired = risk_review(daily, config)
     tables = {"securities": securities, "holdings": holdings, "security_daily_analytics": security,
               "portfolio_positions": positions, "portfolio_daily_summary": daily,
               "sector_exposures": sectors, "portfolio_summary": summary, "rebalancing_history": trades,
               "target_weights": targets, "model_scores": scores, "model_predictions": predictions,
               "model_coefficients": coefficients, "validation_splits": audits,
-              "forward_projection_bands": projection_bands, "forward_projection_summary": projection_summary}
+              "forward_projection_bands": projection_bands, "forward_projection_summary": projection_summary,
+              "scenario_downside": downside, "scenario_sensitivity": sensitivity, "scenario_paired": paired}
     logging.info("[8/9] Generating offline report and CSV exports")
     charts = render_report(output, tables, provenance, config, quality)
     for name, frame in tables.items():

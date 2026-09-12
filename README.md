@@ -2,6 +2,8 @@
 
 ## Five-year conditional scenarios
 
+Downside review is generated with every run in `scenario_downside.csv`, `scenario_paired.csv` and `scenario_sensitivity.csv`, with the same tables in SQLite and the notebook. It distinguishes lower-percentile cutoffs from mean wealth in the worst 5%, compares Growth and Balanced within shared paths, and measures interim drawdowns. The report includes focused downside charts plus moving/circular block sensitivity. Endpoint weighting and artificial joins are explicitly disclosed; these tests do not establish prospective risk probabilities or a universally best allocation.
+
 The primary five-year comparison invests the same CAD 100,000 in every portfolio and XIC at the projection date. The summary table, exported CSVs, SQL mart and uncertainty panels all use this equal capital basis. Separate panels show 25th-75th and 5th-95th percentile ranges on identical CAD scales. A secondary historical continuation rescales these paths to each portfolio's last historical NAV; its unequal balances answer a wealth-continuation question. Colors match the historical notebook. Initial capital is configurable through `initial_capital`.
 
 The engine samples the same complete 20-session historical blocks across all portfolios, preserving contemporaneous dependence. It compounds 1,260 modeled returns over exactly five calendar years, including starting NAV as the initial drawdown peak. Dates are model coordinates rather than an exchange calendar. Sampled net returns retain historical costs; future holdings and trading costs are not recomputed. CSV tables and SQLite retain the bands and summary. A fixed seed makes the run reproducible.

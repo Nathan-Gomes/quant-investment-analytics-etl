@@ -6,6 +6,7 @@ import plotly.express as px
 
 
 from .scenario_charts import comparison, previews, PALETTE
+from .risk_presentation import risk_charts, risk_section
 
 
 COLORS = ["#177565", "#386cb0", "#b44955", "#8969a9", "#646e72"]
@@ -53,6 +54,9 @@ def figures(tables):
 def render_report(output, tables, provenance, config, quality):
     charts = figures(tables)
     previews(output, tables["portfolio_daily_summary"], tables["forward_projection_bands"])
+    risk_charts(output, tables['scenario_downside'])
+    risk_html = risk_section(tables, config)
+    (output / 'scenario_risk_section.html').write_text(risk_section(tables, config, '/investment-analytics/output/'))
     summary = tables["portfolio_summary"].copy()
     for col in ["cumulative_return", "annualized_return", "volatility", "max_drawdown", "excess_annualized_return"]:
         summary[col] = summary[col].map(lambda value: f"{value:.2%}")
@@ -76,7 +80,7 @@ def render_report(output, tables, provenance, config, quality):
     panels = "".join(('<details><summary>Historical wealth continuation (unequal balances)</summary><p>This secondary view carries forward each historical ending balance. The primary comparison and scenario table use equal investments.</p>' if key == "forward_indexed" else '')
                      + f'<section class="chart" id="{key}">{chart.to_html(full_html=False, include_plotlyjs=True if i == 0 else False, config={"responsive": True, "displaylogo": False})}</section>'
                      + ('</details>' if key == "forward_indexed" else '')
-                     + ('<figure style="margin:24px 0"><img src="forward_ranges.png" alt="Five portfolios starting at CAD 100,000 on identical dollar scales, showing median and percentile ranges" style="width:100%;height:auto"><figcaption>Equal initial investments. Conditional simulation ranges, not guaranteed bounds. Dashed medians are pointwise summaries, not individual simulated paths. Outcomes outside the shaded ranges remain possible.</figcaption></figure>' if key == "forward_scenarios" else '')
+                     + (risk_html + '<details><summary>Full percentile ranges</summary><figure style="margin:24px 0"><img src="forward_ranges.png" alt="Five portfolios starting at CAD 100,000 on identical dollar scales, showing median and percentile ranges" style="width:100%;height:auto"><figcaption>Conditional simulation ranges, not guaranteed bounds. Outcomes outside the shaded ranges remain possible.</figcaption></figure></details>' if key == "forward_scenarios" else '')
                      for i, (key, chart) in enumerate(charts.items()))
     daily = tables["portfolio_daily_summary"]
     source = html.escape(provenance["source"])
