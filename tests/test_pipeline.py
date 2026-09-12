@@ -107,7 +107,7 @@ def test_forward_scenarios_start_after_completed_backtest_and_are_reproducible(i
     assert bands.date.max() == daily.date.max() + pd.DateOffset(years=1)
     assert len(bands) == 11 * 3
     for name, group in bands.groupby('portfolio_id'):
-        start = daily[daily.portfolio_id == name].nav.iloc[-1]
+        start = config['initial_capital']
         np.testing.assert_allclose(group.iloc[0][['p05', 'p25', 'median', 'p75', 'p95']].astype(float), start)
     assert (summary.scenario_paths == 100).all()
     pd.testing.assert_frame_equal(bands, repeat_bands)
@@ -119,11 +119,12 @@ def test_shared_scenarios_preserve_identical_returns_and_initial_loss():
     daily = pd.concat([pd.DataFrame({'date': dates, 'portfolio_id': name,
         'nav': capital * .99 ** np.arange(31), 'net_return': [0.] + [-.01] * 30})
         for name, capital in [('Balanced', 100), ('Benchmark', 200)]])
-    config = dict(seed=4, simulation_years=1, simulation_paths=100, bootstrap_block_days=5, trading_days=10)
+    config = dict(seed=4, initial_capital=100000, simulation_years=1, simulation_paths=100, bootstrap_block_days=5, trading_days=10)
     bands, summary = forward_scenarios(daily, config)
     a = bands[bands.portfolio_id == 'Balanced']['median'].to_numpy()
     b = bands[bands.portfolio_id == 'Benchmark']['median'].to_numpy()
-    np.testing.assert_allclose(b, a * 2)
+    np.testing.assert_allclose(b, a)
+    assert (summary.start_value == 100000).all()
     np.testing.assert_allclose(summary.median_max_drawdown, .99 ** 10 - 1)
     assert (summary.probability_terminal_loss == 1).all()
 

@@ -19,7 +19,10 @@ def forward_scenarios(daily, config):
 
     actual = daily.sort_values(["date", "portfolio_id"]).copy()
     returns = actual.pivot(index="date", columns="portfolio_id", values="net_return").iloc[1:]
-    starts = actual.groupby("portfolio_id").nav.last()
+    initial_capital = float(config["initial_capital"])
+    if not np.isfinite(initial_capital) or initial_capital <= 0:
+        raise ValueError("Initial scenario capital must be positive and finite")
+    starts = pd.Series(initial_capital, index=returns.columns)
     if len(returns) < block:
         raise ValueError("Not enough completed return history for the selected bootstrap block")
 

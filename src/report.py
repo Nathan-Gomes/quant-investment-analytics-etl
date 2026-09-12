@@ -23,8 +23,8 @@ def figures(tables):
         "sectors": px.bar(latest, x="portfolio_id", y="weight", color="sector", title="Latest sector exposure", color_discrete_sequence=COLORS),
     }
     projection = tables["forward_projection_bands"]
-    charts["forward_scenarios"] = comparison(daily, projection)
-    charts["forward_indexed"] = comparison(daily, projection, normalized=True)
+    charts["forward_scenarios"] = comparison(daily, projection, normalized=True)
+    charts["forward_indexed"] = comparison(daily, projection)
     returns = daily.pivot(index="date", columns="portfolio_id", values="net_return").iloc[1:]
     charts["correlation"] = px.imshow(returns.corr(), zmin=-1, zmax=1, color_continuous_scale="RdBu", text_auto=".2f", title="Portfolio return correlation", aspect="auto")
     scores = tables["model_scores"]
@@ -73,8 +73,10 @@ def render_report(output, tables, provenance, config, quality):
     scenario_display.columns = ["Portfolio", "Historical end", "Starting value", "5th percentile terminal value",
                                 "Median terminal value", "95th percentile terminal value", "Probability of loss after horizon",
                                 "Median maximum drawdown", "Paths", "Years", "Block days"]
-    panels = "".join(f'<section class="chart" id="{key}">{chart.to_html(full_html=False, include_plotlyjs=True if i == 0 else False, config={"responsive": True, "displaylogo": False})}</section>'
-                     + ('<figure style="margin:24px 0"><img src="forward_ranges.png" alt="Five portfolios on identical index scales, showing median and percentile ranges" style="width:100%;height:auto"><figcaption>Conditional simulation ranges, not guaranteed bounds. Dashed medians are pointwise summaries, not individual simulated paths. Outcomes outside the shaded ranges remain possible.</figcaption></figure>' if key == "forward_indexed" else '')
+    panels = "".join(('<details><summary>Historical wealth continuation (unequal balances)</summary><p>This secondary view carries forward each historical ending balance. The primary comparison and scenario table use equal investments.</p>' if key == "forward_indexed" else '')
+                     + f'<section class="chart" id="{key}">{chart.to_html(full_html=False, include_plotlyjs=True if i == 0 else False, config={"responsive": True, "displaylogo": False})}</section>'
+                     + ('</details>' if key == "forward_indexed" else '')
+                     + ('<figure style="margin:24px 0"><img src="forward_ranges.png" alt="Five portfolios starting at CAD 100,000 on identical dollar scales, showing median and percentile ranges" style="width:100%;height:auto"><figcaption>Equal initial investments. Conditional simulation ranges, not guaranteed bounds. Dashed medians are pointwise summaries, not individual simulated paths. Outcomes outside the shaded ranges remain possible.</figcaption></figure>' if key == "forward_scenarios" else '')
                      for i, (key, chart) in enumerate(charts.items()))
     daily = tables["portfolio_daily_summary"]
     source = html.escape(provenance["source"])
@@ -87,7 +89,7 @@ th:first-child,td:first-child{{position:sticky;left:0;background:#f5f7f7;z-index
 <div class="stats"><div><strong>4</strong>Research portfolios</div><div><strong>{quality['price_records']:,}</strong>Validated price records</div><div><strong>{quality['missing_prices']}</strong>Missing prices</div><div><strong>{config['transaction_cost_bps']} bps</strong>Cost per traded dollar</div></div>
 <h2 id="comparison">Portfolio comparison</h2><p>Growth emphasizes technology. Income emphasizes banks, energy and utilities. Balanced diversifies across these equity sectors. Low volatility uses inverse historical volatility weights. All four remain equity portfolios.</p>
 <div class="table">{summary.to_html(index=False, border=0)}</div>{panels}
-<h2>Five-year scenario analysis</h2><p>The scenario engine begins after the final completed backtest date. It resamples consecutive {config['bootstrap_block_days']}-session blocks of each portfolio's completed net returns, including modeled rebalancing costs, across {config['simulation_paths']:,} paths. This preserves some short-run return clustering while showing a distribution of plausible outcomes rather than a single expected-value promise.</p>
+<h2>Five-year comparison: equal CAD {config['initial_capital']:,.0f} investments</h2><p>Every portfolio and XIC starts with CAD {config['initial_capital']:,.0f} after the final completed backtest date. The table, primary chart and exports all use this equal-capital basis. The secondary historical continuation rescales scenarios to each past ending balance. The engine resamples consecutive {config['bootstrap_block_days']}-session blocks of each portfolio's completed net returns, including modeled rebalancing costs, across {config['simulation_paths']:,} paths. This preserves some short-run return clustering while showing a distribution of plausible outcomes rather than a single expected-value promise.</p>
 <p>These are conditional historical scenarios. All portfolios and XIC use the same sampled 20-session periods. The chart includes the initial value and ends exactly five calendar years later; 252 modeled sessions per year are mapped to that horizon, not to an exchange holiday calendar. Resampled net returns carry historical costs; future trades are not recomputed. Strong historical returns and today's selected securities can make projections optimistic. Bands omit parameter uncertainty and unseen market regimes. They use no returns after the projection start date and do not claim the historical sample will repeat.</p>
 <div class="table">{scenario_display.to_html(index=False, border=0)}</div>
 <h2>Forecast validation</h2><p>Models predict the next {config['forecast_days']} sessions' realized annualized volatility. Selection uses training-period cross-validation only. The last {config['test_fraction']:.0%} is held out, with a {config['forecast_days']}-session gap to exclude overlapping training labels. A negative R² means the model is worse than predicting the test mean. Compare RMSE with persistence before concluding that machine learning helps.</p>

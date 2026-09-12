@@ -15,7 +15,7 @@ def comparison(daily, bands, normalized=False):
     for name, color in PALETTE.items():
         history = daily[daily.portfolio_id == name].sort_values("date")
         future = bands[bands.portfolio_id == name].sort_values("date")
-        scale = 100 / history.nav.iloc[-1] if normalized else 1
+        scale = 1 if normalized else history.nav.iloc[-1] / future["median"].iloc[0]
         if not normalized:
             figure.add_trace(go.Scatter(x=history.date, y=history.nav, name=name,
                 legendgroup=name, line=dict(color=color, width=2), mode="lines"))
@@ -24,8 +24,8 @@ def comparison(daily, bands, normalized=False):
             showlegend=normalized, line=dict(color=color, width=2, dash="dash"), mode="lines"))
     start = bands.date.min()
     figure.add_vline(x=start, line_dash="dot", line_color="#657077")
-    figure.update_layout(title="Equal starting value: August 2026 = 100" if normalized else "2019-2031: history and scenario medians",
-        yaxis_title="Index" if normalized else "CAD", hovermode="x unified")
+    figure.update_layout(title="Equal investment: CAD 100,000 each" if normalized else "Historical wealth continuation (unequal starting balances)",
+        yaxis_title="CAD", hovermode="x unified")
     return figure
 
 
@@ -36,7 +36,7 @@ def previews(output, daily, bands):
         for name, color in PALETTE.items():
             history = daily[daily.portfolio_id == name].sort_values("date")
             future = bands[bands.portfolio_id == name].sort_values("date")
-            scale = 100 / history.nav.iloc[-1] if normalized else 1
+            scale = 1 if normalized else history.nav.iloc[-1] / future["median"].iloc[0]
             if not normalized:
                 ax.plot(history.date, history.nav, color=color, lw=1.6)
             ax.plot(future.date, future["median"] * scale, color=color, lw=1.8, ls="--", label=name)
@@ -44,9 +44,9 @@ def previews(output, daily, bands):
         if not normalized:
             ax.text(.02, .96, "Historical backtest", transform=ax.transAxes, va="top", color="#52616b")
             ax.text(.70, .96, "Conditional scenario medians", transform=ax.transAxes, va="top", color="#52616b")
-        ax.set_title("Same starting value: compare future percentage growth" if normalized else "Portfolio value: historical backtest and five-year scenario medians", loc="left", fontsize=14, pad=44)
+        ax.set_title("Five-year strategy comparison: CAD 100,000 invested in each" if normalized else "Historical wealth continuation: unequal balances at August 2026", loc="left", fontsize=14, pad=44)
         ax.legend(ncol=5, loc="lower left", bbox_to_anchor=(0, 1.01), frameon=False, fontsize=9)
-        ax.set_ylabel("Index (31 Aug 2026 = 100)" if normalized else "CAD")
+        ax.set_ylabel("Portfolio value (CAD)")
         ax.yaxis.set_major_formatter(FuncFormatter(lambda value, _: f"{value:,.0f}"))
         ax.grid(alpha=.18)
         ax.set_xlim(start if normalized else daily.date.min(), end)
@@ -56,13 +56,14 @@ def previews(output, daily, bands):
     fig, axes = plt.subplots(3, 2, figsize=(12, 11), dpi=160, sharex=True, sharey=True)
     for ax, (name, color) in zip(axes.flat, PALETTE.items()):
         future = bands[bands.portfolio_id == name]
-        scale = 100 / future["median"].iloc[0]
+        scale = 1
         ax.fill_between(future.date, future.p05 * scale, future.p95 * scale, color=color, alpha=.13, label="5th-95th percentile")
         ax.fill_between(future.date, future.p25 * scale, future.p75 * scale, color=color, alpha=.24, label="25th-75th percentile")
         ax.plot(future.date, future["median"] * scale, color=color, ls="--", label="Median")
-        ax.axhline(100, color="#657077", lw=.8, ls=":")
+        ax.axhline(future["median"].iloc[0], color="#657077", lw=.8, ls=":")
         ax.set_title(name, loc="left", fontsize=12)
-        ax.set_ylabel("Index (start = 100)")
+        ax.set_ylabel("Portfolio value (CAD)")
+        ax.yaxis.set_major_formatter(FuncFormatter(lambda value, _: f"{value:,.0f}"))
         ax.grid(alpha=.18)
         ax.tick_params(labelbottom=True)
     axes.flat[-1].axis("off")
