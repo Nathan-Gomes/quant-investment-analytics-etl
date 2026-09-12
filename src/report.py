@@ -1,9 +1,14 @@
 import html
 import json
 
+import matplotlib
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 
 
 COLORS = ["#177565", "#386cb0", "#b44955", "#8969a9", "#646e72"]
@@ -12,6 +17,31 @@ COLORS = ["#177565", "#386cb0", "#b44955", "#8969a9", "#646e72"]
 def transparent(hex_color, alpha=0.13):
     red, green, blue = (int(hex_color[index:index + 2], 16) for index in (1, 3, 5))
     return f"rgba({red}, {green}, {blue}, {alpha})"
+
+
+def write_forward_preview(output, daily, projection):
+    """Write a static counterpart for the case-study page."""
+    fig, axis = plt.subplots(figsize=(15, 6.5), dpi=180)
+    portfolio_ids = [name for name in daily.portfolio_id.unique() if name != "Benchmark"]
+    for index, portfolio_id in enumerate(portfolio_ids):
+        color = COLORS[index]
+        history = daily[daily.portfolio_id == portfolio_id]
+        future = projection[projection.portfolio_id == portfolio_id]
+        axis.plot(history.date, history.nav, color=color, linewidth=1.8, label=f"{portfolio_id} actual")
+        axis.fill_between(future.date, future.p05, future.p95, color=color, alpha=0.13)
+        axis.plot(future.date, future["median"], color=color, linewidth=1.8, linestyle="--",
+                  label=f"{portfolio_id} median")
+    projection_start = projection.date.min()
+    axis.axvline(projection_start, color="#69777e", linewidth=1, linestyle=":")
+    axis.annotate("Five-year scenarios begin", xy=(projection_start, axis.get_ylim()[1]), xytext=(8, -10),
+                  textcoords="offset points", color="#536167", fontsize=10, va="top")
+    axis.set_title("Historical portfolio value and five-year scenario range", fontsize=16, weight="bold", pad=14)
+    axis.set_ylabel("CAD")
+    axis.grid(alpha=0.22)
+    axis.legend(ncol=4, fontsize=8.5, loc="upper left", frameon=True)
+    fig.tight_layout()
+    fig.savefig(output / "forward_scenarios.png", bbox_inches="tight", facecolor="white")
+    plt.close(fig)
 
 
 def figures(tables):
@@ -72,6 +102,7 @@ def figures(tables):
 
 def render_report(output, tables, provenance, config, quality):
     charts = figures(tables)
+    write_forward_preview(output, tables["portfolio_daily_summary"], tables["forward_projection_bands"])
     summary = tables["portfolio_summary"].copy()
     for col in ["cumulative_return", "annualized_return", "volatility", "max_drawdown", "excess_annualized_return"]:
         summary[col] = summary[col].map(lambda value: f"{value:.2%}")
