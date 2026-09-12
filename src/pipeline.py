@@ -12,6 +12,7 @@ import pandas as pd
 
 from .analytics import portfolio_analytics, security_analytics
 from .extract import extract
+from .forward import forward_scenarios
 from .load import load_mart
 from .models import fit_models
 from .report import render_report
@@ -25,28 +26,33 @@ def run(root, source="cached", config_path=None):
     config = json.loads((config_path or root / "config.json").read_text())
     if not (0 < config["test_fraction"] < 0.5 and config["forecast_days"] >= 2
             and config["initial_capital"] > 0 and config["transaction_cost_bps"] >= 0
-            and config["risk_free_rate"] > -1 and config["warmup_days"] >= 20):
+            and config["risk_free_rate"] > -1 and config["warmup_days"] >= 20
+            and config["simulation_years"] >= 1 and config["simulation_paths"] >= 100
+            and config["bootstrap_block_days"] >= 1 and config["trading_days"] >= 1):
         raise ValueError("Invalid research configuration")
     run_id = str(uuid.uuid4())
-    logging.info("[1/8] Extracting prices, holdings and security metadata")
+    logging.info("[1/9] Extracting prices, holdings and security metadata")
     prices, holdings, securities, provenance = extract(root, config, source)
     prices = prices[(pd.to_datetime(prices.date) >= config["start"]) & (pd.to_datetime(prices.date) < config["end"])]
-    logging.info("[2/8] Cleaning and validating inputs")
+    logging.info("[2/9] Cleaning and validating inputs")
     prices, quality = clean_inputs(prices, holdings, securities)
-    logging.info("[3/8] Calculating security analytics")
+    logging.info("[3/9] Calculating security analytics")
     security = security_analytics(prices)
-    logging.info("[4/8] Simulating portfolios and transaction costs")
+    logging.info("[4/9] Simulating portfolios and transaction costs")
     daily, positions, sectors, summary, trades, targets = portfolio_analytics(prices, holdings, securities, config)
-    logging.info("[5/8] Validating NAV and allocation reconciliation")
+    logging.info("[5/9] Validating NAV and allocation reconciliation")
     validate_outputs(daily, positions)
-    logging.info("[6/8] Training models with purged time-series validation")
+    logging.info("[6/9] Training models with purged time-series validation")
     scores, predictions, coefficients, audits = fit_models(daily, prices, config)
+    logging.info("[7/9] Simulating five-year portfolio scenarios from completed history")
+    projection_bands, projection_summary = forward_scenarios(daily, config)
     tables = {"securities": securities, "holdings": holdings, "security_daily_analytics": security,
               "portfolio_positions": positions, "portfolio_daily_summary": daily,
               "sector_exposures": sectors, "portfolio_summary": summary, "rebalancing_history": trades,
               "target_weights": targets, "model_scores": scores, "model_predictions": predictions,
-              "model_coefficients": coefficients, "validation_splits": audits}
-    logging.info("[7/8] Generating offline report and CSV exports")
+              "model_coefficients": coefficients, "validation_splits": audits,
+              "forward_projection_bands": projection_bands, "forward_projection_summary": projection_summary}
+    logging.info("[8/9] Generating offline report and CSV exports")
     charts = render_report(output, tables, provenance, config, quality)
     for name, frame in tables.items():
         frame.to_csv(output / f"{name}.csv", index=False)
@@ -60,7 +66,7 @@ def run(root, source="cached", config_path=None):
     tables["pipeline_runs"] = pd.DataFrame([{"run_id": run_id, "timestamp": manifest["timestamp"],
                                             "status": "success", "price_rows": len(prices),
                                             "source": provenance["source"], "manifest": json.dumps(manifest)}])
-    logging.info("[8/8] Loading SQL data mart")
+    logging.info("[9/9] Loading SQL data mart")
     load_mart(output, tables, (root / "sql/analysis_queries.sql").read_text())
     logging.info("Pipeline complete: %s prices; %.1f seconds; report: %s", len(prices), time.perf_counter() - started, output / "report.html")
     return tables, charts

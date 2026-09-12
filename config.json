@@ -8,5 +8,9 @@
   "warmup_days": 252,
   "forecast_days": 20,
   "test_fraction": 0.2,
+  "simulation_years": 5,
+  "simulation_paths": 5000,
+  "bootstrap_block_days": 20,
+  "trading_days": 252,
   "seed": 42
 }

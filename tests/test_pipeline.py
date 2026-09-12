@@ -5,6 +5,7 @@ import pandas as pd
 import pytest
 
 from src.analytics import metrics, portfolio_analytics
+from src.forward import forward_scenarios
 from src.load import load_mart
 from src.models import feature_frame, FEATURES
 from src.validation import clean_inputs, validate_outputs
@@ -94,6 +95,19 @@ def test_low_vol_weights_ignore_future_prices(inputs):
     altered.loc[mask & (altered.ticker == "A"), "adjusted_price"] *= 2
     second = portfolio_analytics(altered, h, s, c)[-1]
     pd.testing.assert_frame_equal(first, second)
+
+
+def test_forward_scenarios_start_after_completed_backtest_and_are_reproducible(inputs):
+    p, h, s, c = inputs
+    daily = portfolio_analytics(p, h, s, c)[0]
+    config = dict(c, seed=7, simulation_years=1, simulation_paths=100, bootstrap_block_days=5, trading_days=10)
+    bands, summary = forward_scenarios(daily, config)
+    repeat_bands, repeat_summary = forward_scenarios(daily, config)
+    assert bands.date.min() > daily.date.max()
+    assert len(bands) == 10 * 2  # Balanced and Low volatility, excluding the benchmark.
+    assert (summary.scenario_paths == 100).all()
+    pd.testing.assert_frame_equal(bands, repeat_bands)
+    pd.testing.assert_frame_equal(summary, repeat_summary)
 
 
 def test_forecast_label_and_features_use_correct_dates():
