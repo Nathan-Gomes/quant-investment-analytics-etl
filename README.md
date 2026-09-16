@@ -1,5 +1,9 @@
 # Quantitative Investment Analytics ETL Pipeline
 
+## Review with Matt
+
+Read the short [review guide](docs/REVIEW_GUIDE.md) first. It gives the project question, the data-to-decision flow, the files worth opening, and the distinction between a historical backtest and a five-year scenario analysis.
+
 ## Five-year conditional scenarios
 
 Downside review is generated with every run in `scenario_downside.csv`, `scenario_paired.csv` and `scenario_sensitivity.csv`, with the same tables in SQLite and the notebook. It distinguishes lower-percentile cutoffs from mean wealth in the worst 5%, compares Growth and Balanced within shared paths, and measures interim drawdowns. The report includes focused downside charts plus moving/circular block sensitivity. Endpoint weighting and artificial joins are explicitly disclosed; these tests do not establish prospective risk probabilities or a universally best allocation.
@@ -14,7 +18,7 @@ Look-ahead controls apply to backtest timing and regression validation: previous
 
 [Live case study](https://www.nathan-gomes.com/Project-Investment-Analytics.dc.html) · [Interactive report](https://www.nathan-gomes.com/investment-analytics/output/report.html) · [Executed notebook](https://www.nathan-gomes.com/investment-analytics/output/notebook.html)
 
-A reproducible Python, pandas and SQL research pipeline that compares four Canadian equity allocations against XIC, models transaction costs, and evaluates next-period volatility forecasts without leaking future data into training.
+A reproducible Python, pandas and SQL research pipeline that compares four Canadian equity allocations against XIC, models transaction costs, and produces transparent five-year scenario ranges from completed return history.
 
 ## What it found
 
@@ -28,13 +32,13 @@ This sample begins with CAD 100,000 on 3 January 2019 and ends on 31 August 2026
 | Income | 16.13% | 16.06% | 0.83 | -33.06% |
 | XIC benchmark | 16.22% | 16.37% | 0.82 | -37.21% |
 
-Growth had the highest raw return, while Balanced had the strongest observed risk-adjusted return. Ridge regression reduced held-out volatility forecast error against trailing-volatility persistence for Growth, Balanced and Low volatility, but not Income. All selected models had negative test R-squared, so the project reports a mixed forecasting result rather than claiming that the model can reliably predict markets.
+Growth had the highest raw return, while Balanced had the strongest observed risk-adjusted return. The five-year scenario analysis carries these contrasting historical return and drawdown characteristics forward as ranges, so a reviewer can compare growth potential with the depth and frequency of adverse paths.
 
 ## Project structure
 
 ```text
 data/        Frozen prices, holdings, and security metadata
-src/         Extract, validation, analytics, modeling, reporting, and SQLite loading
+src/         Extract, validation, analytics, scenario analysis, reporting, and SQLite loading
 sql/         Views using joins, CTEs, aggregations, and window functions
 tests/       Calculation, data-quality, chronology, and publication tests
 notebooks/   Executed research notebook with saved visualizations
@@ -58,9 +62,9 @@ To refresh Yahoo Finance data use `python -m src.pipeline --source download`. To
 
 ## Architecture
 
-CSV/Yahoo prices + holdings + security master -> strict validation -> pandas security analytics -> monthly portfolio simulation -> purged regression validation -> CSV/HTML report -> atomic SQLite publication.
+CSV/Yahoo prices + holdings + security master -> strict validation -> pandas security analytics -> monthly portfolio simulation -> five-year block-bootstrap scenarios -> CSV/HTML report -> atomic SQLite publication.
 
-Modules are deliberately separate: `extract.py`, `validation.py`, `analytics.py`, `models.py`, `report.py`, `load.py`, and `pipeline.py`. The pipeline prints eight stage updates, logs failures, and records successful run provenance and input hashes. Repeated successful runs retain run history in SQLite. Database replacement is atomic; report/CSV artifacts are not a transactional snapshot, so after a failed run use the last successful database and rerun before relying on exported files.
+Modules are deliberately separate: `extract.py`, `validation.py`, `analytics.py`, `forward.py`, `scenario_risk.py`, `report.py`, `load.py`, and `pipeline.py`. The pipeline prints stage updates, logs failures, and records successful run provenance and input hashes. Repeated successful runs retain run history in SQLite. Database replacement is atomic; report/CSV artifacts are not a transactional snapshot, so after a failed run use the last successful database and rerun before relying on exported files.
 
 ## Portfolios
 
@@ -87,9 +91,9 @@ Editable `data/holdings.csv` contains target weights for the first three portfol
 - Drawdown: NAV / running peak NAV - 1, including starting capital in the peak. Maximum drawdown is its minimum.
 - Excess annualized return is the difference between portfolio and benchmark CAGR, not regression alpha.
 
-## Forecast experiment
+## Supplemental volatility experiment
 
-Linear regression, Ridge, Lasso and ElasticNet predict next-20-session realized annualized volatility, not future asset prices. Features include trailing returns, trailing volatility, benchmark return and benchmark volume relative to its rolling mean. Features use information through the prediction close only.
+Linear regression, Ridge, Lasso and ElasticNet predict next-20-session realized annualized volatility, not future asset prices. This supplemental experiment is not used to create the five-year scenarios or select a portfolio. Features include trailing returns, trailing volatility, benchmark return and benchmark volume relative to its rolling mean. Features use information through the prediction close only.
 
 The first 80% of available observations is the development period and the final 20% is untouched holdout. A 20-session purge prevents forward labels crossing a boundary. Four-fold `TimeSeriesSplit` with the same gap drives `GridSearchCV`. `StandardScaler` is fitted inside each fold through an sklearn Pipeline. Hyperparameters and the displayed model are selected on CV MSE, never on test performance. Predictions are clipped at zero. A persistence forecast of trailing 20-day volatility is evaluated on the identical test rows. CSVs retain predictions, RMSE, R-squared, coefficients, selected parameters and split dates.
 

@@ -10,6 +10,7 @@ def scenario_paths(daily, config, circular=False):
     The simulation starts immediately after the final backtest date. Consecutive
     blocks of realized net returns preserve short-run market behaviour while the
     percentile bands communicate uncertainty rather than a point prediction.
+    This is a historically conditional scenario engine, not an ML price forecast.
     """
     paths = int(config["simulation_paths"])
     days = int(config["simulation_years"] * config["trading_days"])
@@ -34,6 +35,9 @@ def scenario_paths(daily, config, circular=False):
     sampled_index = (block_starts[:, :, None] + np.arange(block)).reshape(paths, -1)[:, :days]
     if circular:
         sampled_index %= len(returns)
+
+    # Every portfolio receives the same sampled market dates. Differences in a
+    # paired scenario therefore come from portfolio construction, not a lucky draw.
     for portfolio_id in returns.columns:
         series = returns[portfolio_id].to_numpy(dtype=float)
         sampled_returns = series[sampled_index]
@@ -43,6 +47,7 @@ def scenario_paths(daily, config, circular=False):
 
 
 def forward_scenarios(daily, config):
+    """Summarize equal-capital five-year scenario bands and interim drawdowns."""
     quantiles = [0.05, 0.25, 0.50, 0.75, 0.95]
     bands, summaries = [], []
     for portfolio_id, dates, values in scenario_paths(daily, config):

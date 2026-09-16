@@ -7,6 +7,7 @@ from .forward import scenario_paths
 
 
 def paired_outcomes(left, right, left_name='Growth', right_name='Balanced'):
+    """Compare two portfolios on the same simulated market sequences."""
     difference = np.asarray(left) - np.asarray(right)
     return dict(left_portfolio=left_name, right_portfolio=right_name,
                 probability_underperformance=float(np.mean(difference < 0)),
@@ -16,6 +17,7 @@ def paired_outcomes(left, right, left_name='Growth', right_name='Balanced'):
 
 
 def risk_review(daily, config):
+    """Report tail outcomes and sensitivity without selecting a preferred model."""
     experiments = [('Published model', config['bootstrap_block_days'], False),
                    ('126-session moving blocks', 126, False),
                    ('252-session moving blocks', 252, False),

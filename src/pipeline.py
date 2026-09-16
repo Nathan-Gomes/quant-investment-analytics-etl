@@ -21,6 +21,7 @@ from .validation import clean_inputs, validate_outputs
 
 
 def run(root, source="cached", config_path=None):
+    """Run the reproducible research pipeline from validated inputs to report."""
     started = time.perf_counter()
     output = root / "output"
     output.mkdir(exist_ok=True)
@@ -46,6 +47,7 @@ def run(root, source="cached", config_path=None):
     logging.info("[6/9] Training models with purged time-series validation")
     scores, predictions, coefficients, audits = fit_models(daily, prices, config)
     logging.info("[7/9] Simulating five-year portfolio scenarios from completed history")
+    # Scenarios start after the historical backtest and never alter its decisions.
     projection_bands, projection_summary = forward_scenarios(daily, config)
     downside, sensitivity, paired = risk_review(daily, config)
     tables = {"securities": securities, "holdings": holdings, "security_daily_analytics": security,
