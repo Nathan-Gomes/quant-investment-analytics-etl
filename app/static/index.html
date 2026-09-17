@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Portfolio Lab — backtest and scenario bench</title>
+<meta name="description" content="Build a portfolio from any set of tickers, see what it did over the last 5 to 10 years, and see the range of five to ten year scenarios drawn from its own return history.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="masthead">
+  <h1>Portfolio Lab</h1>
+  <span class="lede">Historical backtest and block-bootstrap scenarios, on the engine from the Quantitative Investment Analytics pipeline.</span>
+  <div class="tools">
+    <span class="mode" id="mode" title="Where prices come from"></span>
+    <button class="chip" id="theme-toggle" type="button" title="Switch between light and dark">Dark</button>
+    <button class="chip" id="export-json" type="button" title="Download every number behind this page">Export results</button>
+  </div>
+</header>
+
+<div class="shell">
+  <form class="rail" id="rail" autocomplete="off">
+    <section>
+      <h3>Portfolios <span class="faint" id="portfolio-count"></span></h3>
+      <div class="tabs" id="portfolio-tabs"></div>
+      <div class="field wide">
+        <input type="text" id="portfolio-name" maxlength="40" aria-label="Portfolio name">
+      </div>
+      <div class="field">
+        <label for="scheme">Weighting</label>
+        <select id="scheme">
+          <option value="custom">As entered</option>
+          <option value="equal">Equal weight</option>
+          <option value="inverse_volatility">Inverse volatility</option>
+        </select>
+      </div>
+      <div id="holdings"></div>
+      <div class="weightbar" id="weightbar"></div>
+      <p class="rail-error" id="universe-note"></p>
+      <div class="rowline">
+        <span class="muted" id="weight-total"></span>
+        <span class="chips">
+          <button class="chip" type="button" id="add-holding">Add holding</button>
+          <button class="chip" type="button" id="normalize">Normalize</button>
+        </span>
+      </div>
+    </section>
+
+    <section>
+      <h3>Study window</h3>
+      <div class="field" id="source-field"><label for="source">Price data</label>
+        <select id="source">
+          <option value="auto">Yahoo Finance</option>
+          <option value="bundled">Bundled dataset</option>
+        </select>
+      </div>
+      <div class="chips" style="margin-bottom:9px">
+        <button class="chip" type="button" data-years="5">Last 5 years</button>
+        <button class="chip" type="button" data-years="10">Last 10 years</button>
+        <button class="chip" type="button" data-years="max">Longest shared</button>
+      </div>
+      <div class="field"><label for="start">Start</label><input type="date" id="start"></div>
+      <div class="field"><label for="end">End</label><input type="date" id="end"></div>
+      <div class="field"><label for="benchmark">Benchmark</label><input type="text" id="benchmark" placeholder="XIC.TO"></div>
+      <div class="field"><label for="capital">Starting amount</label><input type="number" id="capital" min="1000" step="1000"></div>
+      <div class="field"><label for="rebalance">Rebalance</label>
+        <select id="rebalance">
+          <option value="monthly">Monthly</option>
+          <option value="quarterly">Quarterly</option>
+          <option value="annual">Annually</option>
+          <option value="none">Buy and hold</option>
+        </select>
+      </div>
+      <div class="field"><label for="cost">Trading cost (bps)</label><input type="number" id="cost" min="0" max="500" step="1"></div>
+    </section>
+
+    <section>
+      <h3>Scenarios</h3>
+      <div class="field"><label for="horizon">Horizon (years)</label><input type="number" id="horizon" min="1" max="30" step="1"></div>
+      <div class="field"><label for="paths">Simulated markets</label><input type="number" id="paths" min="200" max="20000" step="100"></div>
+      <details class="advanced">
+        <summary>Sampling and assumptions</summary>
+        <div class="field"><label for="block">Block length (sessions)</label><input type="number" id="block" min="1" max="504" step="1"></div>
+        <div class="field"><label for="basis">Starting balance</label>
+          <select id="basis">
+            <option value="equal">Same for every portfolio</option>
+            <option value="continuation">Each portfolio's final value</option>
+          </select>
+        </div>
+        <div class="field"><label for="rf">Risk-free rate</label><input type="number" id="rf" min="-0.5" max="1" step="0.005"></div>
+        <div class="field"><label for="seed">Seed</label><input type="number" id="seed" min="0" step="1"></div>
+      </details>
+    </section>
+
+    <section>
+      <button class="button primary" type="submit" id="run">Run analysis</button>
+      <div class="note" id="run-status" style="margin-top:8px"></div>
+      <div class="chips" style="margin-top:12px" id="presets"></div>
+    </section>
+  </form>
+
+  <main class="results" id="results">
+    <div class="empty">
+      <h2>Start with a few tickers</h2>
+      <p class="note">Enter the holdings and weights on the left, pick a window, and run it. You get the realized path over that window and a fan of scenarios built by resampling the portfolio's own completed returns — the same method the research pipeline uses, applied to your universe.</p>
+      <p class="note">Add a second portfolio to compare two allocations in the same simulated markets, so the difference between them comes from construction rather than a luckier draw.</p>
+    </div>
+  </main>
+</div>
+
+<script src="charts.js"></script>
+<script src="backend.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

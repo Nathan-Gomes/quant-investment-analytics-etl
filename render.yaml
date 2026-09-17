@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: nathan-portfolio-lab
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: PORTFOLIO_LAB_SOURCE
+        value: auto
