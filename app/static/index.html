@@ -17,7 +17,8 @@
   <div class="tools">
     <span class="mode" id="mode" title="Where prices come from"></span>
     <button class="chip" id="theme-toggle" type="button" title="Switch between light and dark">Dark</button>
-    <button class="chip" id="export-json" type="button" title="Download every number behind this page">Export results</button>
+    <button class="chip" id="share-setup" type="button" title="Copy a link that reproduces this exact setup">Copy link</button>
+    <button class="chip" id="export-json" type="button" title="Download every number behind this page, with its provenance">Export results</button>
   </div>
 </header>
 
@@ -32,10 +33,44 @@
       <div class="field">
         <label for="scheme">Weighting</label>
         <select id="scheme">
-          <option value="custom">As entered</option>
-          <option value="equal">Equal weight</option>
-          <option value="inverse_volatility">Inverse volatility</option>
+          <optgroup label="Fixed rules">
+            <option value="custom">As entered</option>
+            <option value="equal">Equal weight</option>
+            <option value="inverse_volatility">Inverse volatility</option>
+          </optgroup>
+          <optgroup label="Re-optimized at each rebalance">
+            <option value="minimum_variance">Minimum variance</option>
+            <option value="risk_parity">Risk parity</option>
+            <option value="maximum_diversification">Maximum diversification</option>
+            <option value="maximum_sharpe">Maximum Sharpe</option>
+          </optgroup>
         </select>
+      </div>
+      <div id="optimizer-settings" hidden>
+        <div class="field"><label for="estimation">Estimation window</label>
+          <select id="estimation">
+            <option value="126">6 months</option>
+            <option value="252">1 year</option>
+            <option value="504">2 years</option>
+            <option value="756">3 years</option>
+          </select>
+        </div>
+        <div class="field"><label for="maxweight">Cap per holding</label>
+          <select id="maxweight">
+            <option value="1">No cap</option>
+            <option value="0.5">50%</option>
+            <option value="0.35">35%</option>
+            <option value="0.25">25%</option>
+            <option value="0.15">15%</option>
+          </select>
+        </div>
+        <div class="field"><label for="estimator">Covariance</label>
+          <select id="estimator">
+            <option value="ledoit_wolf">Ledoit-Wolf shrinkage</option>
+            <option value="sample">Sample</option>
+          </select>
+        </div>
+        <p class="note" id="optimizer-note"></p>
       </div>
       <div id="holdings"></div>
       <div class="weightbar" id="weightbar"></div>

@@ -14,6 +14,13 @@
     autorun: false,
     defaultStart: null,
     defaultEnd: null,
+    supportsOptimization: true,
+    strategies: null,
+    async conformance(name) {
+      const response = await fetch(endpoint(`api/conformance?strategy=${encodeURIComponent(name)}`));
+      if (!response.ok) throw new Error(`The conformance harness returned ${response.status}.`);
+      return (await response.json()).reports[0];
+    },
     universe: null,        // Yahoo accepts any symbol it knows, so nothing to check against
     bundledUniverse: null,  // the frozen dataset is a closed list, so it can be checked
 
@@ -29,8 +36,16 @@
         } catch (error) {
           backend.bundledUniverse = null;
         }
+        try {
+          // The menu is built from the registry, so a methodology registered in
+          // Python appears here with nothing in the interface to edit.
+          const listed = await (await fetch(endpoint("api/strategies"))).json();
+          backend.strategies = listed.strategies;
+        } catch (error) {
+          backend.strategies = null;
+        }
       } catch (error) {
-        // A temporary health-check failure must never change the user's data source.
+        // A connection failure must not silently replace Yahoo with frozen prices.
         backend.defaultSource = "auto";
       }
     },

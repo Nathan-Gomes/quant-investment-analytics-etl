@@ -1,118 +1,257 @@
-# Quantitative Investment Analytics ETL Pipeline
+# Quantitative Investment Analytics
 
-## Review with Matt
+**A reproducible research pipeline and portfolio construction bench: compare allocations, test risk, and translate quantitative methods into auditable software.**
 
-Read the short [review guide](docs/REVIEW_GUIDE.md) first. It gives the project question, the data-to-decision flow, the files worth opening, and the distinction between a historical backtest and a five-year scenario analysis.
+[Launch the live app](https://nathan-portfolio-lab.onrender.com/) · [Open the offline demo](https://www.nathan-gomes.com/portfolio-lab-demo.html) · [Read the case study](https://www.nathan-gomes.com/Project-Investment-Analytics.dc.html)
 
-## Five-year conditional scenarios
+The live app supports Yahoo Finance tickers and Python optimization. The offline demo uses nine frozen securities and does not include the Python solvers. Neither places trades.
 
-Downside review is generated with every run in `scenario_downside.csv`, `scenario_paired.csv` and `scenario_sensitivity.csv`, with the same tables in SQLite and the notebook. It distinguishes lower-percentile cutoffs from mean wealth in the worst 5%, compares Growth and Balanced within shared paths, and measures interim drawdowns. The report includes focused downside charts plus moving/circular block sensitivity. Endpoint weighting and artificial joins are explicitly disclosed; these tests do not establish prospective risk probabilities or a universally best allocation.
+[![Tests](https://github.com/Nathan-Gomes/quant-investment-analytics-etl/actions/workflows/test.yml/badge.svg)](https://github.com/Nathan-Gomes/quant-investment-analytics-etl/actions/workflows/test.yml)
+![Python](https://img.shields.io/badge/python-3.11%2B-blue)
+![Tests](https://img.shields.io/badge/tests-99%20passing-brightgreen)
+![Conformance](https://img.shields.io/badge/methodologies-6%2F6%20conform-brightgreen)
+![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
-The primary five-year comparison invests the same CAD 100,000 in every portfolio and XIC at the projection date. The summary table, exported CSVs, SQL mart and uncertainty panels all use this equal capital basis. Separate panels show 25th-75th and 5th-95th percentile ranges on identical CAD scales. A secondary historical continuation rescales these paths to each portfolio's last historical NAV; its unequal balances answer a wealth-continuation question. Colors match the historical notebook. Initial capital is configurable through `initial_capital`.
+![Realized value, then the scenario fan](docs/assets/timeline.png)
 
-The engine samples the same complete 20-session historical blocks across all portfolios, preserving contemporaneous dependence. It compounds 1,260 modeled returns over exactly five calendar years, including starting NAV as the initial drawdown peak. Dates are model coordinates rather than an exchange calendar. Sampled net returns retain historical costs; future holdings and trading costs are not recomputed. CSV tables and SQLite retain the bands and summary. A fixed seed makes the run reproducible.
+*One continuous axis. Realized portfolio value through the end of the study window, a dashed seam, then five years of block-bootstrap scenarios. The shaded fan is the selected portfolio's 5th–95th and 25th–75th percentile range; the dashed lines are the other portfolios' medians, drawn on identical sampled market sequences.*
 
-These scenarios repeat the sample's return distribution, including its strong growth. They are not independently estimated expected returns, validated five-year forecasts, or guarantees. Parameter uncertainty, unobserved regimes, taxes and inflation are omitted. Medians at successive dates are not one investable path.
+---
 
-Look-ahead controls apply to backtest timing and regression validation: previous-close weights, pre-investment inverse-volatility calibration, chronological folds, purged forward labels and training-only scaling. Today's security universe and manually selected policies still create selection and survivorship bias; the research does not claim an entirely unbiased backtest. Scenario information never enters prior historical decisions.
+## What this is
 
-[Live case study](https://www.nathan-gomes.com/Project-Investment-Analytics.dc.html) · [Interactive report](https://www.nathan-gomes.com/investment-analytics/output/report.html) · [Executed notebook](https://www.nathan-gomes.com/investment-analytics/output/notebook.html)
+Three things, in one repository.
 
-A reproducible Python, pandas and SQL research pipeline that compares four Canadian equity allocations against XIC, models transaction costs, and produces transparent five-year scenario ranges from completed return history.
+**A research pipeline.** Adjusted price history to a validated SQLite mart and an offline HTML report, with every calculation, cost assumption and data check made explicit. It compares four Canadian equity allocations against the XIC benchmark from 2019 to 2026.
+
+**A portfolio bench.** A web app where any set of tickers and weights can be backtested over any window and projected forward with the same block-bootstrap engine — and where portfolios can be *constructed* rather than only measured, by minimum variance, risk parity, maximum diversification or maximum Sharpe, re-solved at every rebalance from a trailing window.
+
+**A path from research to production.** Construction rules are registered against a contract rather than hard-coded. Every one passes the same conformance battery before it ships, and every result carries a manifest that says exactly what produced it.
+
+![Portfolio Lab interface](docs/assets/app-overview.png)
+
+*The research bench in dark mode: portfolio controls, historical results and conditional scenario ranges. This reproducible example explicitly uses the frozen dataset.*
+
+## Quick start
+
+```sh
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt -r requirements-app.txt
+
+python -m src.pipeline --source cached   # the research pipeline -> output/report.html
+python -m app.server                     # the bench -> http://127.0.0.1:8000
+python -m pytest -q                      # 99 tests
+python -m app.conformance                # the methodology gate
+```
+
+`python tools/build_demo.py` produces `dist/portfolio-lab-demo.html`: the whole bench in one file, engine included, running in the browser on the frozen dataset with no server and no network.
 
 ## What it found
 
-This sample begins with CAD 100,000 on 3 January 2019 and ends on 31 August 2026. Values use adjusted prices and modeled monthly-rebalance costs.
+CAD 100,000 from 3 January 2019 to 31 August 2026. Adjusted prices, monthly rebalancing, 10 bps of cost on traded notional.
 
-| Portfolio | Annualized return | Volatility | Sharpe | Maximum drawdown |
+| Portfolio | Annualized | Volatility | Sharpe | Max drawdown |
 | --- | ---: | ---: | ---: | ---: |
-| Growth | 27.80% | 28.60% | 0.90 | -48.72% |
-| Balanced | 19.12% | 16.29% | 0.97 | -28.73% |
-| Low volatility | 17.57% | 15.29% | 0.94 | -29.71% |
-| Income | 16.13% | 16.06% | 0.83 | -33.06% |
-| XIC benchmark | 16.22% | 16.37% | 0.82 | -37.21% |
+| Growth | 27.80% | 28.60% | 0.90 | −48.72% |
+| Balanced | 19.12% | 16.29% | **0.97** | −28.73% |
+| Low volatility | 17.57% | 15.29% | 0.94 | −29.71% |
+| Income | 16.13% | 16.06% | 0.83 | −33.06% |
+| XIC benchmark | 16.22% | 16.37% | 0.82 | −37.21% |
 
-Growth had the highest raw return, while Balanced had the strongest observed risk-adjusted return. The five-year scenario analysis carries these contrasting historical return and drawdown characteristics forward as ranges, so a reviewer can compare growth potential with the depth and frequency of adverse paths.
+Growth earned the highest raw return and paid for it in drawdown. Balanced earned the most per unit of risk in this sample.
+
+### And a less comfortable finding
+
+Running the optimizers walk-forward over the same universe, re-solving at every rebalance from the trailing year:
+
+| Construction rule | Annualized | Volatility | Sharpe | Turnover a year |
+| --- | ---: | ---: | ---: | ---: |
+| Minimum variance | 14.89% | 15.23% | 0.79 | 1.40 |
+| Risk parity | 18.14% | 15.21% | 0.98 | 0.55 |
+| **Equal weight** | 20.21% | 16.93% | **1.00** | 0.39 |
+| XIC benchmark | 16.22% | 16.37% | 0.82 | — |
+
+Walk-forward minimum variance underperforms equal weighting in this selected sample and trades more frequently. This is consistent with the estimation-error concern studied by DeMiguel, Garlappi and Uppal (2009), but is not a replication of their study or proof of the cause of this result. The bench makes those tradeoffs visible instead of assuming optimization must improve performance.
+
+---
+
+## Inside the bench
+
+![Walk-forward optimization and conformance checks](docs/assets/optimization-plate.png)
+
+*Trailing-window construction, risk contributions and the expanded methodology checks, captured from a completed run of the Python app.*
+
+### Risk and return, promised and delivered
+
+![Efficient frontier with realized outcomes](docs/assets/efficient-frontier.png)
+
+The dashed curve is the efficient frontier fitted to the *whole* window, so it uses hindsight. The filled dots show realized walk-forward results. Their separation illustrates the difference between in-sample estimates and realized outcomes; it does not isolate estimation error from costs, constraints or changing allocations.
+
+### How much an optimizer moves
+
+![Optimizer weights through time](docs/assets/optimizer-weights.png)
+
+Every re-estimation shifts the weights — here the 35% cap binds on one holding for the entire period. A rule that jumps each month pays for it in trading costs, and the churn is a sign the estimates are noisier than the differences they are acting on.
+
+### Where the scenarios land
+
+![Distribution of terminal values](docs/assets/terminal-distribution.png)
+
+Five thousand paths of 20-session blocks resampled from each portfolio's own completed returns, every portfolio given identical block positions so a comparison is paired rather than a lucky draw. The app reports the median, the 5th and 95th percentiles, the probability of ending below the starting balance, and the drawdowns along the way.
+
+### Depth of the holes
+
+![Drawdowns](docs/assets/drawdown.png)
+
+---
+
+## Methodology
+
+### The conventions, stated
+
+- Daily return is current adjusted close over previous, minus one.
+- Portfolio gross return is the **previous close's** weights times each asset's current return, so no holding is ever set using the return it earns.
+- Weights drift between rebalances. A rebalance charges `pre-cost NAV × Σ|weight change| × bps / 10,000`, counting both sides.
+- Annualized return compounds wealth to the power of 252 over observed days. Volatility is the sample daily standard deviation times √252. Sharpe uses a constant risk-free rate converted to a daily equivalent.
+- Drawdown includes the starting balance as the first peak, so an early loss shows as one.
+- Tickers from different exchanges keep only the sessions on which every holding traded. A dropped day is safer than a carried-forward price, which would invent a zero-return session.
+
+Full detail in [`docs/README_pipeline_detail.md`](docs/README_pipeline_detail.md).
+
+### Portfolio construction
+
+Covariance is estimated with **Ledoit-Wolf shrinkage** toward a scaled identity, the intensity estimated from the data and reported in the interface. With 25 assets and a year of daily data a sample covariance matrix fits 325 parameters on 252 observations, and its smallest eigenvalues — precisely the directions a variance minimizer loads into — are the worst estimated. Expected returns, where an objective needs them, are shrunk toward the cross-sectional mean; three of the four objectives need none at all.
+
+Solver restarts are used only where the objective is non-convex. Minimizing a positive-definite quadratic over a convex set has one optimum, so multi-start there buys nothing and costs a multiple of the run time.
+
+### Forward scenarios
+
+A block bootstrap of each portfolio's own completed net returns, never a price forecast. Sampling consecutive blocks preserves volatility clustering. It repeats the window's return distribution, including its luck and its regime — it is not an estimate of future returns, and the median at successive dates is not a path anyone could have held.
+
+---
+
+## From a researcher's rule to running software
+
+A methodology is a function from a context to a weight vector, registered with metadata. Nothing else changes: the API advertises the registry, the interface builds its menu from it, and the walk-forward loop runs anything in it.
+
+```python
+register(Strategy(
+    name="inverse_variance",
+    label="Inverse variance",
+    description="Weights proportional to the reciprocal of each holding's variance.",
+    solve=inverse_variance,
+    author="r.chen",
+))
+```
+
+Then it faces the same gate everything else passed:
+
+```
+$ python -m app.conformance --strategy inverse_variance --verbose
+
+PASS  inverse_variance
+  ok  fully invested: weights sum to 1.0000000000
+  ok  honours a weight cap: largest weight under a 30% cap was 0.3000
+  ok  deterministic: largest difference across two identical calls: 0.00e+00
+  ok  independent of asset order: largest difference after permuting: 7.48e-09
+  ok  survives perfectly correlated holdings: returned a valid portfolio
+  ok  survives a zero-variance holding: returned a valid portfolio
+  ok  weight stability: resampling moves weights by 3.7% on average
+  ok  runs within budget: median solve 8 ms against a 750 ms budget
+  ok  scales to 60 assets: solved in 67 ms
+```
+
+Fifteen checks, identical data for every methodology, non-zero exit on failure, run in CI beside the unit tests. Each exists because that class of failure is silent: the code returns a plausible weight vector and the damage only appears in the P&L. `tests/test_strategies.py` defines methodologies broken in each of those ways and asserts the harness fails them on the check that names the fault.
+
+The battery earned its place on its first run by failing `maximum_sharpe` on speed, at 1,070 ms against a 750 ms budget. See [`docs/ADDING_A_METHODOLOGY.md`](docs/ADDING_A_METHODOLOGY.md).
+
+## Architecture
+
+```mermaid
+flowchart LR
+  subgraph Data
+    Y[Yahoo Finance<br/>via yfinance] --> C[Per-ticker cache<br/>with provenance]
+    F[Frozen CSV<br/>checksum verified] --> V
+    C --> V[Validation<br/>and alignment]
+  end
+
+  subgraph Engine
+    V --> B[Walk-forward backtest<br/>lagged weights, drift, costs]
+    R[Strategy registry] -->|weights at each rebalance| B
+    B --> S[Block bootstrap<br/>shared blocks, paired]
+    B --> M[Metrics and<br/>risk decomposition]
+  end
+
+  subgraph Delivery
+    S --> P[JSON payload<br/>plus run manifest]
+    M --> P
+    P --> A[FastAPI service]
+    A --> U[Browser interface]
+    P --> D[Single-file demo<br/>engine ported to JS]
+  end
+
+  R -.->|must pass| G[Conformance harness<br/>15 checks, CI gate]
+```
+
+## Validation and reproducibility
+
+| Property | How it is held in place |
+| --- | --- |
+| The bench agrees with the research pipeline | Reproduces `output/portfolio_summary.csv` to nine significant figures; a test fails if it drifts |
+| The browser engine agrees with Python | Both draw blocks from the same mulberry32 generator, verified bit for bit; a test runs both over one request and compares |
+| Optimized weights are walk-forward | A test rewrites the final month of prices and asserts no earlier weight or NAV moves |
+| A methodology is safe to run | A 15-check conformance battery in CI, with tests that prove it fails bad methodologies |
+| A result can be traced | Every response carries a run identifier derived from the request, a digest of the price values used, a digest of the source, and the library versions — the same study on the same data always carries the same identifier |
+| A study can be shared | The whole setup encodes into the link, so a colleague opens the identical study rather than a description of one |
+
+```
+99 tests · 6/6 methodologies conform · report, notebook and demo rebuilt on every push
+```
 
 ## Project structure
 
 ```text
-data/        Frozen prices, holdings, and security metadata
-src/         Extract, validation, analytics, scenario analysis, reporting, and SQLite loading
-sql/         Views using joins, CTEs, aggregations, and window functions
-tests/       Calculation, data-quality, chronology, and publication tests
-notebooks/   Executed research notebook with saved visualizations
-output/      Reproducible report, run manifest, and compact result exports
+app/         The bench: engine, optimizer, strategy registry, conformance
+             harness, provenance, market data, FastAPI service, interface
+src/         The pipeline: extract, validation, analytics, scenarios, report, SQL load
+data/        Frozen prices, holdings, security master
+sql/         Views using joins, CTEs, aggregations and window functions
+tests/       99 tests: parity, solver correctness, no-look-ahead, conformance
+tools/       Single-file demo build, cross-language test harness
+docs/        Review guide, app guide, methodology guide, handoff brief
+notebooks/   Executed research notebook
 ```
 
-## Run
+## Limits
 
-```sh
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python -m src.pipeline --source cached
-python -m pytest -q
-python scripts/build_notebook.py
-```
+Stated here because they are the first thing a reviewer should ask about.
 
-Open `output/report.html` directly in a browser. `output/notebook.html` is the executed research notebook; `notebooks/portfolio_exploration.ipynb` opens in JupyterLab. All report charts work offline. CSV exports work with Tableau or Power BI, and `output/investment_analytics.db` is the SQLite research mart.
+- **Survivorship and selection bias.** The universe was chosen today, knowing which names survived and did well. That flatters any backtest, and nothing here corrects for it.
+- **The scenario fan is not a forecast.** It resamples one window's distribution and assumes the future is drawn from the same one.
+- **No FX.** Mixing currencies measures each in its own; the app warns rather than converting.
+- **Not modelled:** taxes, inflation, cash dividends, delistings, market impact beyond a fixed spread, spreads that widen in stress.
+- **A constant risk-free rate** across a decade is an assumption, and Sharpe is sensitive to it.
+- **Estimation error dominates.** With a handful of assets and a few years of daily data, the differences between candidate portfolios are frequently smaller than the error in the inputs that produced them.
 
-To refresh Yahoo Finance data use `python -m src.pipeline --source download`. To run an explicitly labeled simulated example use `--source synthetic`. Download failures never silently substitute simulated returns. The default cached run checks the frozen CSV checksum. Configure dates, starting capital, transaction costs, risk-free rate and validation settings in `config.json`, or pass `--config path.json`.
-
-## Architecture
-
-CSV/Yahoo prices + holdings + security master -> strict validation -> pandas security analytics -> monthly portfolio simulation -> five-year block-bootstrap scenarios -> CSV/HTML report -> atomic SQLite publication.
-
-Modules are deliberately separate: `extract.py`, `validation.py`, `analytics.py`, `forward.py`, `scenario_risk.py`, `report.py`, `load.py`, and `pipeline.py`. The pipeline prints stage updates, logs failures, and records successful run provenance and input hashes. Repeated successful runs retain run history in SQLite. Database replacement is atomic; report/CSV artifacts are not a transactional snapshot, so after a failed run use the last successful database and rerun before relying on exported files.
-
-## Portfolios
-
-| Portfolio | Construction |
-| --- | --- |
-| Growth | 65% technology, with bank and railway exposure |
-| Income | Banks, energy and utilities; not a dividend cash-flow model |
-| Balanced | Diversified equity sectors; no bond allocation |
-| Low volatility | Inverse-volatility weights calibrated from the initial 252 sessions |
-| Benchmark | XIC.TO, a broad Canadian equity ETF |
-
-Editable `data/holdings.csv` contains target weights for the first three portfolios. Low-volatility weights are calculated using only the calibration history, frozen, and used at subsequent rebalances. It is an inverse-volatility heuristic, not a minimum-variance optimizer. The initial calibration is excluded from all reported portfolio performance.
-
-## Financial conventions
-
-- Prices are CAD adjusted closes, approximating dividend-reinvested total returns. Adjusted units are research accounting units, not actual broker shares. No external deposits or withdrawals are modeled.
-- Daily return: current adjusted close / previous adjusted close - 1.
-- Portfolio gross return: sum of previous-close weight times current asset return.
-- Rebalance at the close of the first observed session of a new month. Allocations drift between rebalances. Costs equal pre-cost NAV times sum of absolute weight changes times basis points / 10,000. Both buy and sell notional count. Initial funding costs are excluded consistently.
-- Net return: post-cost NAV / previous NAV - 1. Sector weights use current post-rebalance positions.
-- Annualized return: compounded wealth raised to 252 / observed return days, minus 1.
-- Volatility: sample daily standard deviation times square root of 252.
-- Sharpe: mean daily return minus equivalent daily risk-free rate, divided by sample standard deviation, times square root of 252. It is undefined for zero volatility.
-- Drawdown: NAV / running peak NAV - 1, including starting capital in the peak. Maximum drawdown is its minimum.
-- Excess annualized return is the difference between portfolio and benchmark CAGR, not regression alpha.
-
-## Supplemental volatility experiment
-
-Linear regression, Ridge, Lasso and ElasticNet predict next-20-session realized annualized volatility, not future asset prices. This supplemental experiment is not used to create the five-year scenarios or select a portfolio. Features include trailing returns, trailing volatility, benchmark return and benchmark volume relative to its rolling mean. Features use information through the prediction close only.
-
-The first 80% of available observations is the development period and the final 20% is untouched holdout. A 20-session purge prevents forward labels crossing a boundary. Four-fold `TimeSeriesSplit` with the same gap drives `GridSearchCV`. `StandardScaler` is fitted inside each fold through an sklearn Pipeline. Hyperparameters and the displayed model are selected on CV MSE, never on test performance. Predictions are clipped at zero. A persistence forecast of trailing 20-day volatility is evaluated on the identical test rows. CSVs retain predictions, RMSE, R-squared, coefficients, selected parameters and split dates.
-
-Forecasts do not alter holdings. Overlapping targets make errors dependent; this project does not claim statistical significance, predictive profitability, or that any model must beat persistence. Negative test R-squared is reported honestly.
-
-## SQL and validation
-
-The mart contains security analytics, position facts, daily NAV, sector exposures, research holdings, target weights, model outputs and run history. `sql/analysis_queries.sql` demonstrates joins, CTEs, aggregations, `LAG`, `ROW_NUMBER` and `DENSE_RANK`. Monthly returns exclude the first partial month when no preceding month-end exists.
-
-Validation rejects nonpositive/nonfinite prices, missing prices, conflicting duplicates, unknown holdings and weights that fail to sum to one. Exact duplicates are removed and counted. Position values and weights reconcile to NAV. Tests exercise hand-calculated compounding, initial losses, fees, lagged weights, future-data invariance, forward label construction and failed database publication. CI tests and executes a synthetic smoke run without depending on a market API.
-
-## Limitations
-
-The chosen present-day universe introduces survivorship and selection bias. Adjusted history can be revised by the provider. This is not point-in-time institutional data. Shared absent dates across every security cannot be detected without an exchange calendar; per-security date gaps are rejected. No FX, taxes, delistings, market impact beyond fixed basis points, or actual dividend payments are modeled. A constant risk-free rate is an assumption. Sector classifications are manually supplied. All portfolios are long-only equities and have materially different exposures. Historical performance does not establish future suitability.
+This is research tooling for studying historical data under stated assumptions. It is not investment advice, and no output is a recommendation to buy or sell anything. Market data access remains subject to the provider's terms.
 
 ## References
 
-- [scikit-learn TimeSeriesSplit](https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.TimeSeriesSplit.html)
-- [scikit-learn Pipeline](https://scikit-learn.org/stable/modules/generated/sklearn.pipeline.Pipeline.html)
-- [yfinance source and documentation](https://github.com/ranaroussi/yfinance)
+- Ledoit, O. and Wolf, M. (2004). *A well-conditioned estimator for large-dimensional covariance matrices.* Journal of Multivariate Analysis.
+- DeMiguel, V., Garlappi, L. and Uppal, R. (2009). *Optimal versus naive diversification: how inefficient is the 1/N portfolio strategy?* Review of Financial Studies.
+- Politis, D. and Romano, J. (1994). *The stationary bootstrap.* Journal of the American Statistical Association.
+- [scikit-learn TimeSeriesSplit](https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.TimeSeriesSplit.html) · [yfinance](https://github.com/ranaroussi/yfinance)
 
-Market-data access and redistribution remain subject to the provider's terms. This repository is a local research demonstration, not a trading service.
+## Documentation
+
+| Document | For |
+| --- | --- |
+| [`docs/REVIEW_GUIDE.md`](docs/REVIEW_GUIDE.md) | Reading the research in fifteen minutes |
+| [`docs/APP_GUIDE.md`](docs/APP_GUIDE.md) | Running the bench, the API, and its limits |
+| [`docs/ADDING_A_METHODOLOGY.md`](docs/ADDING_A_METHODOLOGY.md) | The contract, the gate, and a worked example |
+| [`docs/HANDOFF.md`](docs/HANDOFF.md) | Deploying it |
+| [`docs/README_pipeline_detail.md`](docs/README_pipeline_detail.md) | Portfolio definitions, conventions, SQL mart, validation rules |
+
+## Presentation reference
+
+The screenshot-led project walkthrough was informed by [Genesis Synapse Showcase](https://github.com/ColinLefter/Genesis-Synapse-Showcase). All screenshots here show Portfolio Lab; no Genesis code or product assets are included.

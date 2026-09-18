@@ -371,3 +371,68 @@ def test_a_downloaded_universe_runs_end_to_end(fake_yahoo):
 def test_one_bad_symbol_does_not_sink_the_whole_request(fake_yahoo):
     with pytest.raises(ValueError, match="NOSUCH"):
         marketdata.load(["AAPL", "NOSUCH"], "2015-01-01", "2026-01-01", source="yahoo")
+
+
+# --------------------------------------------------------------------------- #
+# Provenance
+# --------------------------------------------------------------------------- #
+
+def test_the_same_study_always_carries_the_same_run_id(published_run):
+    """A fingerprint, not a serial number: reproducibility you can check by eye."""
+    priceset = marketdata.load_bundled(None)
+    portfolios = [Portfolio("G", {"SHOP.TO": 35, "RY.TO": 65})]
+    first = analysis.analyze(priceset.prices, portfolios, Settings(benchmark="XIC.TO", paths=300),
+                             metadata=priceset.metadata, start="2019-01-01")
+    second = analysis.analyze(priceset.prices, [Portfolio("G", {"RY.TO": 65, "SHOP.TO": 35})],
+                              Settings(benchmark="XIC.TO", paths=300),
+                              metadata=priceset.metadata, start="2019-01-01")
+    assert first["meta"]["run_id"] == second["meta"]["run_id"]   # order of holdings is not a difference
+    assert len(first["meta"]["run_id"]) == 16
+
+
+@pytest.mark.parametrize("change", ["seed", "cost", "window", "paths"])
+def test_any_change_to_the_inputs_changes_the_run_id(change):
+    priceset = marketdata.load_bundled(None)
+    portfolios = [Portfolio("G", {"SHOP.TO": 35, "RY.TO": 65})]
+    base = dict(benchmark="XIC.TO", paths=300, seed=42, transaction_cost_bps=10)
+    altered = dict(base)
+    start = "2019-01-01"
+    if change == "seed":
+        altered["seed"] = 43
+    elif change == "cost":
+        altered["transaction_cost_bps"] = 12
+    elif change == "paths":
+        altered["paths"] = 400
+    else:
+        start = "2019-02-01"
+    first = analysis.analyze(priceset.prices, portfolios, Settings(**base),
+                             metadata=priceset.metadata, start="2019-01-01")
+    second = analysis.analyze(priceset.prices, portfolios, Settings(**altered),
+                              metadata=priceset.metadata, start=start)
+    assert first["meta"]["run_id"] != second["meta"]["run_id"]
+
+
+def test_revised_prices_produce_a_different_run_even_with_the_same_request():
+    """Providers revise adjusted history; the manifest digests the values used."""
+    priceset = marketdata.load_bundled(None)
+    revised = priceset.prices.copy()
+    # Inside the study window: a revision before it would not enter the calculation,
+    # and the manifest digests the values that did.
+    inside = revised.index[revised.date >= "2020-01-01"][0]
+    revised.loc[inside, "adjusted_price"] *= 1.001
+    settings = Settings(benchmark="XIC.TO", paths=300)
+    portfolios = [Portfolio("G", {"SHOP.TO": 35, "RY.TO": 65})]
+    original = analysis.analyze(priceset.prices, portfolios, settings,
+                                metadata=priceset.metadata, start="2019-01-01")
+    changed = analysis.analyze(revised, portfolios, settings,
+                               metadata=priceset.metadata, start="2019-01-01")
+    assert original["manifest"]["data"]["sha256"] != changed["manifest"]["data"]["sha256"]
+    assert original["meta"]["run_id"] != changed["meta"]["run_id"]
+
+
+def test_the_manifest_records_the_code_and_environment_that_ran(published_run):
+    record = published_run["manifest"]
+    assert len(record["code_sha256"]) == 64
+    assert "engine.py" in record["code_files"] and "optimize.py" in record["code_files"]
+    assert record["environment"]["packages"]["numpy"]
+    assert record["data"]["tickers"] and record["data"]["rows"] > 1000

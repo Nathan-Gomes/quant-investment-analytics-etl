@@ -27,7 +27,7 @@ import pandas as pd
 
 TRADING_DAYS = 252
 SCHEDULES = ("none", "monthly", "quarterly", "annual")
-SCHEMES = ("custom", "equal", "inverse_volatility", "market_cap_free_float")
+SCHEMES = ("custom", "equal", "inverse_volatility", "optimized")
 
 
 @dataclass
@@ -68,11 +68,38 @@ class Settings:
 
 @dataclass
 class Portfolio:
-    """A named allocation over some subset of the loaded universe."""
+    """A named allocation over some subset of the loaded universe.
+
+    ``scheme`` decides where the weights come from. ``custom`` uses what was
+    entered; ``equal`` and ``inverse_volatility`` are rules; ``optimized`` hands
+    the choice to ``app/optimize.py``, re-solved at every rebalance from a
+    trailing window, with the settings below.
+    """
 
     name: str
     weights: dict[str, float] = field(default_factory=dict)
     scheme: str = "custom"
+    objective: str = "minimum_variance"
+    estimation_days: int = 252
+    max_weight: float = 1.0
+    estimator: str = "ledoit_wolf"
+    volatility_target: float | None = None
+    parameters: dict = field(default_factory=dict)
+
+    def validate(self) -> None:
+        if self.scheme not in SCHEMES:
+            raise ValueError(f"{self.name}: unknown weighting scheme '{self.scheme}'.")
+        if self.scheme == "optimized":
+            from .strategies import REGISTRY
+            if self.objective not in REGISTRY:
+                raise ValueError(
+                    f"{self.name}: unknown methodology '{self.objective}'. "
+                    f"Registered: {', '.join(sorted(REGISTRY))}."
+                )
+            if not 60 <= self.estimation_days <= 2520:
+                raise ValueError(f"{self.name}: the estimation window must be between 60 and 2,520 sessions.")
+            if self.estimator not in ("ledoit_wolf", "sample"):
+                raise ValueError(f"{self.name}: covariance estimator must be 'ledoit_wolf' or 'sample'.")
 
     def resolve(self, columns: Sequence[str], calibration_returns: pd.DataFrame) -> pd.Series:
         if self.scheme == "equal":
@@ -194,16 +221,27 @@ def metrics(returns: Iterable[float], risk_free_rate: float = 0.03) -> dict:
     }
 
 
-def run_backtest(wide: pd.DataFrame, target: pd.Series, settings: Settings, schedule: str | None = None) -> dict:
-    """Walk the window one session at a time, exactly as the pipeline does."""
+def run_backtest(wide: pd.DataFrame, target: pd.Series, settings: Settings, schedule: str | None = None,
+                 target_provider=None) -> dict:
+    """Walk the window one session at a time, exactly as the pipeline does.
+
+    ``target_provider`` turns a fixed allocation into a rule. It is called with
+    the position of the session whose close is being traded and must return the
+    weights to hold from that close onward, so a walk-forward optimizer can
+    re-estimate at each rebalance. It is only ever given data through that
+    close; the engine never shows it a future return.
+    """
     schedule = schedule or settings.rebalance
     columns = list(wide.columns)
     prices = wide.to_numpy(dtype=float)
     returns = np.zeros_like(prices)
     returns[1:] = prices[1:] / prices[:-1] - 1
+    if target_provider is not None:
+        target = pd.Series(target_provider(0), index=columns)
     weights = target.to_numpy(dtype=float).copy()
     target_array = weights.copy()
     flags = rebalance_mask(wide.index, schedule)
+    target_history = [{"date": wide.index[0], "weights": target_array.copy()}]
 
     days = len(wide)
     nav = np.empty(days)
@@ -223,6 +261,10 @@ def run_backtest(wide: pd.DataFrame, target: pd.Series, settings: Settings, sche
         exposure_sum += weights
         drifted = weights * (1 + r) / (1 + step) if (1 + step) != 0 else weights
         if flags[i]:
+            if target_provider is not None:
+                # Re-estimated from data through this close, never beyond it.
+                target_array = np.asarray(target_provider(i), dtype=float)
+                target_history.append({"date": wide.index[i], "weights": target_array.copy()})
             traded = float(np.abs(target_array - drifted).sum())
             charge = before_cost * traded * settings.transaction_cost_bps / 10_000
         else:
@@ -246,6 +288,7 @@ def run_backtest(wide: pd.DataFrame, target: pd.Series, settings: Settings, sche
     )
     return {
         "dates": wide.index,
+        "target_history": target_history,
         "nav": nav,
         "net_returns": net,
         "gross_returns": gross,

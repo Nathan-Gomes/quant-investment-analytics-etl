@@ -76,8 +76,58 @@
     return target;
   }
 
+  const canonical = (value) => {
+    // Sorted keys and no spaces, matching the Python side's digest input.
+    if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+    if (value && typeof value === "object") {
+      return `{${Object.keys(value).sort().map((k) => `${JSON.stringify(k)}:${canonical(value[k])}`).join(",")}}`;
+    }
+    return JSON.stringify(value === undefined ? null : value);
+  };
+
+  async function sha256(text) {
+    if (!globalThis.crypto?.subtle) return null;
+    const bytes = new TextEncoder().encode(text);
+    const buffer = await globalThis.crypto.subtle.digest("SHA-256", bytes);
+    return [...new Uint8Array(buffer)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  async function localManifest(request, data) {
+    // The browser build can digest the request it was given and name the frozen
+    // dataset it carries. It cannot digest the Python source or the environment
+    // it does not have, and it says so rather than reporting a partial record as
+    // if it were the full one.
+    const requestDigest = await sha256(canonical(request));
+    return {
+      run_id: requestDigest ? requestDigest.slice(0, 16) : null,
+      generated_at: new Date().toISOString().slice(0, 19),
+      engine_version: `${PL.ENGINE_VERSION || "1.0.0"} (in-browser)`,
+      request_sha256: requestDigest,
+      request,
+      data: {
+        rows: data.dates.length * Object.keys(data.prices).length,
+        tickers: Object.keys(data.prices).sort(),
+        first_date: data.dates[0],
+        last_date: data.dates[data.dates.length - 1],
+        sha256: null,
+        source: data.source,
+      },
+      code_sha256: null,
+      environment: { python: null, packages: {} },
+      partial: "Issued by the browser build. Source and environment digests are "
+        + "recorded by the Python service, which is what a shared result should cite.",
+    };
+  }
+
   function analyze(request) {
     const data = PL.DATA;
+    if (request.portfolios.some((p) => p.scheme === "optimized")) {
+      throw new Error(
+        "Portfolio optimization runs in the Python app, not in this browser demo. "
+        + "Run the app locally to solve for minimum variance, risk parity, maximum diversification "
+        + "or maximum Sharpe.",
+      );
+    }
     const E = engine();
     const warnings = [];
     const names = [];
@@ -336,6 +386,8 @@
 
   PL.backend = {
     sources: ["bundled"],
+    // The solvers live in Python; this build has no server to run them.
+    supportsOptimization: false,
     defaultSource: "bundled",
     allowsSourceChoice: false,
     autorun: true,
@@ -351,7 +403,10 @@
     },
     async analyze(request) {
       await new Promise((resolve) => setTimeout(resolve, 0));
-      return analyze(request);
+      const payload = analyze(request);
+      payload.manifest = await localManifest(request, PL.DATA);
+      payload.meta.run_id = payload.manifest.run_id;
+      return payload;
     },
   };
 })(window.PL = window.PL || {});

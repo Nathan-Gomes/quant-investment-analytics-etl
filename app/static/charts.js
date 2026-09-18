@@ -339,6 +339,160 @@ function whiskers(node, spec) {
   return render;
 }
 
+
+/* ------------------------------------------------------------------ */
+/* Risk-return plane: the hindsight frontier against what was realized */
+/* ------------------------------------------------------------------ */
+
+function frontier(node, spec) {
+  const render = () => {
+    clear(node);
+    const width = measure(node);
+    const height = spec.height || 330;
+    node.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    node.setAttribute("height", height);
+    const pad = { top: 14, right: 20, bottom: 38, left: 58 };
+    const plotW = width - pad.left - pad.right;
+    const plotH = height - pad.top - pad.bottom;
+
+    // The scale is set by the frontier and by what the portfolios realized. A
+    // single wild holding would otherwise squeeze everything worth reading into
+    // a corner, so anything outside the view is named underneath instead.
+    const anchorX = spec.curve.volatilities.concat(spec.realized.map((r) => r.volatility));
+    const anchorY = spec.curve.returns.concat(spec.realized.map((r) => r.annualized_return));
+    const xlo = Math.max(0, Math.min(...anchorX) * 0.8);
+    const xhi = Math.max(...anchorX) * 1.18;
+    // Returns here are all positive in a normal sample, and anchoring the axis at
+    // zero would flatten the differences worth reading. Keep a margin instead.
+    const ymin = Math.min(...anchorY);
+    const ylo = ymin > 0 ? ymin * 0.55 : ymin * 1.15;
+    const yhi = Math.max(...anchorY) * 1.15;
+    const inside = (a) => a.volatility <= xhi && a.expected_return <= yhi && a.expected_return >= ylo;
+    const shown = spec.assets.filter(inside);
+    const hidden = spec.assets.filter((a) => !inside(a));
+    const x = scale([xlo, xhi], [pad.left, pad.left + plotW], false);
+    const y = scale([ylo, yhi], [pad.top + plotH, pad.top], false);
+
+    niceTicks(ylo, yhi, 5).forEach((t) => {
+      el("line", { class: t === 0 ? "zeroline" : "gridline", x1: pad.left, x2: pad.left + plotW, y1: y(t), y2: y(t) }, node);
+      el("text", { x: pad.left - 8, y: y(t) + 3.5, "text-anchor": "end" }, node).textContent = percent(t, 0);
+    });
+    niceTicks(xlo, xhi, 5).forEach((t) => {
+      if (t < xlo) return;
+      el("text", { x: x(t), y: height - 20, "text-anchor": "middle" }, node).textContent = percent(t, 0);
+    });
+    el("text", { x: pad.left + plotW / 2, y: height - 5, "text-anchor": "middle" }, node)
+      .textContent = "annualized volatility";
+
+    el("path", {
+      class: "band", fill: "none", d: path(spec.curve.volatilities.map((v, i) => [x(v), y(spec.curve.returns[i])])),
+      stroke: "var(--ink-muted)", "stroke-dasharray": "5 3", "stroke-width": 1.4,
+    }, node);
+    const lastIndex = spec.curve.volatilities.length - 1;
+    el("text", {
+      class: "seam-label", x: x(spec.curve.volatilities[lastIndex]) - 6,
+      y: y(spec.curve.returns[lastIndex]) - 8, "text-anchor": "end",
+    }, node).textContent = "frontier fitted to this window";
+
+    // One label list for assets and portfolios together: nudge them apart in a
+    // single pass so an asset name cannot land underneath a portfolio's.
+    const labels = shown.map((asset) => ({
+      text: asset.ticker.replace(".TO", ""), cx: x(asset.volatility), cy: y(asset.expected_return),
+      color: "var(--ink-faint)", radius: 3, filled: false,
+    })).concat(spec.realized.map((point) => ({
+      text: point.name, cx: x(point.volatility), cy: y(point.annualized_return),
+      color: point.color, radius: 6, filled: true,
+    }))).sort((a, b) => a.cy - b.cy || a.cx - b.cx);
+
+    // Only labels that would actually overlap get moved: two points far apart
+    // across the chart never collide, and pushing them down for the sake of a
+    // single pass would scatter labels away from the points they name.
+    const placed = [];
+    labels.forEach((label) => {
+      const width = label.text.length * 6.2;
+      label.labelY = label.cy;
+      placed
+        .filter((other) => Math.abs(other.cx - label.cx) < Math.max(width, other.width) + 12)
+        .forEach((other) => { label.labelY = Math.max(label.labelY, other.labelY + 13); });
+      label.width = width;
+      placed.push(label);
+    });
+
+    labels.forEach((label) => {
+      if (Math.abs(label.labelY - label.cy) > 2) {
+        el("line", {
+          x1: label.cx + label.radius + 1, y1: label.cy,
+          x2: label.cx + label.radius + 5, y2: label.labelY - 3.5,
+          stroke: label.color, "stroke-width": 1, "stroke-opacity": 0.45,
+        }, node);
+      }
+      el("circle", {
+        cx: label.cx, cy: label.cy, r: label.radius,
+        fill: label.filled ? label.color : "none",
+        "fill-opacity": label.filled ? 0.9 : 0,
+        stroke: label.filled ? "none" : label.color, "stroke-width": label.filled ? 0 : 1.2,
+      }, node);
+      el("text", {
+        x: label.cx + label.radius + 7, y: label.labelY + 3.5,
+        fill: label.filled ? "var(--ink)" : "var(--ink-faint)",
+      }, node).textContent = label.text;
+    });
+
+    if (hidden.length) {
+      el("text", { x: pad.left + 4, y: pad.top + 11, "text-anchor": "start", fill: "var(--ink-faint)" }, node)
+        .textContent = "off this view: " + hidden
+          .map((a) => `${a.ticker.replace(".TO", "")} at ${percent(a.volatility, 0)}`).join(", ");
+    }
+  };
+  render();
+  return render;
+}
+
+/* ------------------------------------------------------------------ */
+/* Weights through time, to show how much an optimizer moves           */
+/* ------------------------------------------------------------------ */
+
+function stacked(node, spec) {
+  const render = () => {
+    clear(node);
+    const width = measure(node);
+    const height = spec.height || 230;
+    node.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    node.setAttribute("height", height);
+    const pad = { top: 10, right: 92, bottom: 22, left: 40 };
+    const plotW = width - pad.left - pad.right;
+    const plotH = height - pad.top - pad.bottom;
+    const stamps = spec.dates.map(stampOf);
+    const x = scale([stamps[0], stamps[stamps.length - 1]], [pad.left, pad.left + plotW], false);
+    const y = scale([0, 1], [pad.top + plotH, pad.top], false);
+
+    const lower = new Array(spec.dates.length).fill(0);
+    spec.series.forEach((series, index) => {
+      const upper = lower.map((base, i) => base + series.values[i]);
+      const top = stamps.map((stamp, i) => [x(stamp), y(upper[i])]);
+      const bottom = stamps.map((stamp, i) => [x(stamp), y(lower[i])]).reverse();
+      el("path", {
+        d: path(top) + "L" + bottom.map(([px, py]) => `${px.toFixed(1)} ${py.toFixed(1)}`).join("L") + "Z",
+        fill: series.color, "fill-opacity": 0.75, stroke: "var(--panel)", "stroke-width": 0.5,
+      }, node);
+      const mid = (upper[upper.length - 1] + lower[lower.length - 1]) / 2;
+      if (upper[upper.length - 1] - lower[lower.length - 1] > 0.035) {
+        el("text", { x: pad.left + plotW + 6, y: y(mid) + 3.5, fill: "var(--ink-muted)" }, node)
+          .textContent = series.name.replace(".TO", "");
+      }
+      for (let i = 0; i < lower.length; i += 1) lower[i] = upper[i];
+    });
+    [0, 0.25, 0.5, 0.75, 1].forEach((t) => {
+      el("text", { x: pad.left - 8, y: y(t) + 3.5, "text-anchor": "end" }, node).textContent = percent(t, 0);
+    });
+    yearTicks(stamps).forEach(({ stamp, label }) => {
+      el("text", { x: x(stamp), y: height - 6, "text-anchor": "middle" }, node).textContent = label;
+    });
+  };
+  render();
+  return render;
+}
+
 function observeResize(renderers) {
   let frame = null;
   const redraw = () => { frame = null; renderers.forEach((fn) => fn && fn()); };
@@ -351,5 +505,5 @@ function observeResize(renderers) {
   return { observe() {}, disconnect() { window.removeEventListener("resize", schedule); } };
 }
 
-PL.charts = { money, percent, ratio, timeline, drawdown, distribution, whiskers, observeResize };
+PL.charts = { money, percent, ratio, timeline, drawdown, distribution, whiskers, frontier, stacked, observeResize };
 })(window.PL = window.PL || {});

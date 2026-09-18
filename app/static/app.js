@@ -9,6 +9,15 @@ const charts = PL.charts;
 const backend = PL.backend;
 
 const SERIES = ["--s1", "--s2", "--s3", "--s5", "--s4", "--s6"];
+// The interface offers objectives; the engine takes a scheme plus an objective.
+const OBJECTIVES = {
+  minimum_variance: "the lowest-variance mix of these holdings",
+  risk_parity: "weights where every holding supplies the same share of risk",
+  maximum_diversification: "the largest gap between the holdings' own risk and the portfolio's",
+  maximum_sharpe: "the best estimated risk-adjusted return, which needs a return forecast",
+};
+const isObjective = (scheme) => Object.prototype.hasOwnProperty.call(OBJECTIVES, scheme);
+const describeObjective = (scheme) => OBJECTIVES[scheme] || "the registered methodology";
 const BENCHMARK_COLOR = "--benchmark";
 
 const PRESETS = [
@@ -20,6 +29,20 @@ const PRESETS = [
       { name: "Growth", scheme: "custom", holdings: [["SHOP.TO", 35], ["CSU.TO", 30], ["CNR.TO", 20], ["RY.TO", 15]] },
       { name: "Balanced", scheme: "custom", holdings: [["RY.TO", 15], ["TD.TO", 10], ["SHOP.TO", 10], ["CSU.TO", 10], ["ENB.TO", 15], ["FTS.TO", 15], ["EMA.TO", 10], ["CNR.TO", 15]] },
       { name: "Income", scheme: "custom", holdings: [["RY.TO", 25], ["TD.TO", 20], ["ENB.TO", 20], ["FTS.TO", 20], ["EMA.TO", 15]] },
+    ],
+  },
+  {
+    // The comparison worth running first: three construction rules on one universe.
+    label: "Optimizer bake-off",
+    source: "bundled",
+    benchmark: "XIC.TO",
+    portfolios: [
+      { name: "Minimum variance", scheme: "minimum_variance", maxWeight: 0.35, estimationDays: 252,
+        holdings: [["RY.TO", 0], ["TD.TO", 0], ["SHOP.TO", 0], ["CSU.TO", 0], ["ENB.TO", 0], ["FTS.TO", 0], ["EMA.TO", 0], ["CNR.TO", 0]] },
+      { name: "Risk parity", scheme: "risk_parity", maxWeight: 0.35, estimationDays: 252,
+        holdings: [["RY.TO", 0], ["TD.TO", 0], ["SHOP.TO", 0], ["CSU.TO", 0], ["ENB.TO", 0], ["FTS.TO", 0], ["EMA.TO", 0], ["CNR.TO", 0]] },
+      { name: "Equal weight", scheme: "equal",
+        holdings: [["RY.TO", 0], ["TD.TO", 0], ["SHOP.TO", 0], ["CSU.TO", 0], ["ENB.TO", 0], ["FTS.TO", 0], ["EMA.TO", 0], ["CNR.TO", 0]] },
     ],
   },
   {
@@ -57,6 +80,61 @@ const state = {
 };
 
 const $ = (id) => document.getElementById(id);
+
+/* A run is reproducible only if someone else can start from the same inputs.
+   The whole setup encodes into the link, so a colleague opening it sees the
+   identical study rather than a description of one. */
+function encodeSetup() {
+  const setup = {
+    v: 1,
+    p: state.portfolios.map((portfolio) => ({
+      n: portfolio.name, s: portfolio.scheme,
+      e: portfolio.estimationDays, m: portfolio.maxWeight, c: portfolio.estimator,
+      h: portfolio.holdings.filter((holding) => holding.ticker)
+        .map((holding) => [holding.ticker, holding.weight]),
+    })),
+    g: state.settings,
+  };
+  return btoa(unescape(encodeURIComponent(JSON.stringify(setup)))).replace(/=+$/, "");
+}
+
+function decodeSetup(encoded) {
+  const setup = JSON.parse(decodeURIComponent(escape(atob(encoded))));
+  if (!setup || setup.v !== 1 || !Array.isArray(setup.p) || !setup.p.length) {
+    throw new Error("That link does not carry a readable setup.");
+  }
+  state.portfolios = setup.p.map((portfolio) => ({
+    id: uid(),
+    name: String(portfolio.n || "Portfolio").slice(0, 40),
+    scheme: portfolio.s || "custom",
+    estimationDays: Number(portfolio.e) || 252,
+    maxWeight: Number(portfolio.m) || 1,
+    estimator: portfolio.c === "sample" ? "sample" : "ledoit_wolf",
+    holdings: (portfolio.h || []).map(([ticker, weight]) => ({
+      ticker: String(ticker).toUpperCase().slice(0, 16), weight: Number(weight) || 0,
+    })),
+  }));
+  Object.assign(state.settings, setup.g || {});
+  state.active = 0;
+}
+
+function shareSetup() {
+  const link = `${location.origin}${location.pathname}#setup=${encodeSetup()}`;
+  const done = (message) => {
+    const status = $("run-status");
+    const previous = status.innerHTML;
+    status.textContent = message;
+    setTimeout(() => { status.innerHTML = previous; }, 2600);
+  };
+  history.replaceState(null, "", `#setup=${encodeSetup()}`);
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(link)
+      .then(() => done("Link copied. It reproduces this exact setup."))
+      .catch(() => done("Link is in the address bar."));
+  } else {
+    done("Link is in the address bar.");
+  }
+}
 const colorOf = (index, benchmark) => `var(${benchmark ? BENCHMARK_COLOR : SERIES[index % SERIES.length]})`;
 const uid = () => Math.random().toString(36).slice(2, 8);
 
@@ -65,6 +143,7 @@ const uid = () => Math.random().toString(36).slice(2, 8);
 function loadPreset(preset) {
   state.portfolios = preset.portfolios.map((p) => ({
     id: uid(), name: p.name, scheme: p.scheme,
+    estimationDays: p.estimationDays || 252, maxWeight: p.maxWeight || 1, estimator: "ledoit_wolf",
     holdings: p.holdings.map(([ticker, weight]) => ({ ticker, weight })),
   }));
   state.active = 0;
@@ -123,6 +202,7 @@ function drawTabs() {
         id: uid(),
         name: `Portfolio ${String.fromCharCode(65 + state.portfolios.length)}`,
         scheme: "equal",
+        estimationDays: 252, maxWeight: 1, estimator: "ledoit_wolf",
         holdings: source.holdings.map((h) => ({ ...h })),
       });
       state.active = state.portfolios.length - 1;
@@ -150,6 +230,22 @@ function drawUniverseNote() {
   note.textContent = unknown.length
     ? `${[...new Set(unknown)].join(", ")} ${unknown.length > 1 ? "are" : "is"} not in this demo's dataset. It holds ${backend.universe.join(", ")} — run the app locally for any other symbol.`
     : "";
+}
+
+function drawOptimizerSettings() {
+  const portfolio = currentPortfolio();
+  const panel = $("optimizer-settings");
+  const optimizing = isObjective(portfolio.scheme);
+  panel.hidden = !optimizing;
+  if (!optimizing) return;
+  $("estimation").value = String(portfolio.estimationDays);
+  $("maxweight").value = String(portfolio.maxWeight);
+  $("estimator").value = portfolio.estimator;
+  const years = (portfolio.estimationDays / 252).toFixed(portfolio.estimationDays % 252 ? 1 : 0);
+  $("optimizer-note").textContent =
+    `${describeObjective(portfolio.scheme)} Re-estimated at every rebalance from the previous `
+    + `${years} year${years === "1" ? "" : "s"} of returns only. The holdings below set the universe; `
+    + "the weights you type are ignored.";
 }
 
 function drawHoldings() {
@@ -182,6 +278,7 @@ function drawHoldings() {
   });
   drawWeightBar();
   drawUniverseNote();
+  drawOptimizerSettings();
 }
 
 function drawWeightBar() {
@@ -238,6 +335,9 @@ function readRail() {
 function bindRail() {
   $("portfolio-name").oninput = (e) => { currentPortfolio().name = e.target.value; drawTabs(); };
   $("scheme").onchange = (e) => { currentPortfolio().scheme = e.target.value; drawHoldings(); };
+  $("estimation").onchange = (e) => { currentPortfolio().estimationDays = Number(e.target.value); drawOptimizerSettings(); };
+  $("maxweight").onchange = (e) => { currentPortfolio().maxWeight = Number(e.target.value); };
+  $("estimator").onchange = (e) => { currentPortfolio().estimator = e.target.value; };
   $("add-holding").onclick = () => { currentPortfolio().holdings.push({ ticker: "", weight: 0 }); drawHoldings(); };
   $("normalize").onclick = () => {
     const holdings = currentPortfolio().holdings.filter((h) => h.ticker);
@@ -260,7 +360,10 @@ function bindRail() {
     };
   });
   const presets = $("presets");
-  PRESETS.filter((p) => backend.sources.includes(p.source) || p.source === "auto").forEach((preset) => {
+  PRESETS
+    .filter((p) => backend.sources.includes(p.source) || p.source === "auto")
+    .filter((p) => backend.supportsOptimization || !p.portfolios.some((q) => isObjective(q.scheme)))
+    .forEach((preset) => {
     const chip = document.createElement("button");
     chip.type = "button";
     chip.className = "chip";
@@ -285,16 +388,42 @@ function bindRail() {
     $("theme-toggle").textContent = dark ? "Dark" : "Light";
     rerender();
   };
+  $("share-setup").onclick = shareSetup;
   $("export-json").onclick = () => {
     if (!state.result) return;
     const blob = new Blob([JSON.stringify(state.result, null, 2)], { type: "application/json" });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    link.download = "portfolio-lab-results.json";
+    link.download = `portfolio-lab-${state.result.meta.run_id || "results"}.json`;
     link.click();
     URL.revokeObjectURL(link.href);
   };
   if (!backend.allowsSourceChoice) $("source-field").style.display = "none";
+  if (backend.supportsOptimization && backend.strategies) {
+    const group = $("scheme").querySelector('optgroup[label^="Re-optimized"]');
+    if (group) {
+      group.innerHTML = "";
+      backend.strategies.forEach((strategy) => {
+        const option = document.createElement("option");
+        option.value = strategy.name;
+        option.textContent = strategy.label;
+        option.title = strategy.description;
+        group.appendChild(option);
+        OBJECTIVES[strategy.name] = strategy.description;
+      });
+    }
+  }
+  if (!backend.supportsOptimization) {
+    // Say why the options are gone rather than leaving a shorter list unexplained.
+    const group = $("scheme").querySelector('optgroup[label^="Re-optimized"]');
+    if (group) group.remove();
+    const note = document.createElement("p");
+    note.className = "note";
+    note.style.margin = "-4px 0 10px";
+    note.textContent = "Minimum variance, risk parity, maximum diversification and maximum Sharpe are "
+      + "solved in the Python app; this browser demo runs the fixed rules only.";
+    $("scheme").closest(".field").after(note);
+  }
   if (backend.universe) {
     const list = document.createElement("datalist");
     list.id = "universe";
@@ -321,7 +450,16 @@ function buildRequest() {
       if (portfolio.scheme === "custom" && !(h.weight > 0)) return;
       weights[h.ticker] = portfolio.scheme === "custom" ? h.weight : 1;
     });
-    return { name: portfolio.name || "Portfolio", weights, scheme: portfolio.scheme };
+    const optimizing = isObjective(portfolio.scheme);
+    return {
+      name: portfolio.name || "Portfolio",
+      weights,
+      scheme: optimizing ? "optimized" : portfolio.scheme,
+      objective: optimizing ? portfolio.scheme : undefined,
+      estimation_days: portfolio.estimationDays,
+      max_weight: portfolio.maxWeight,
+      estimator: portfolio.estimator,
+    };
   });
   const empty = portfolios.find((p) => !Object.keys(p.weights).length);
   if (empty) {
@@ -422,6 +560,8 @@ function renderResults() {
   host.appendChild(metricsPlate(result));
   host.appendChild(drawdownPlate(result));
   host.appendChild(scenarioPlate(result));
+  const optimization = optimizationPlate(result);
+  if (optimization) host.appendChild(optimization);
   host.appendChild(compositionPlate(result));
   host.appendChild(assumptionsPlate(result));
 
@@ -731,6 +871,158 @@ function compositionPlate(result) {
   return node;
 }
 
+function optimizationPlate(result) {
+  const optimized = result.portfolios.filter((p) => p.optimization);
+  if (!optimized.length && !result.frontier) return null;
+  const focus = optimized.find((p) => p.name === state.selected) || optimized[0];
+  const node = plate(
+    "Optimization, out of sample",
+    focus
+      ? `Weights are re-solved at every rebalance from the previous ${(focus.optimization.estimation_days / 252).toFixed(focus.optimization.estimation_days % 252 ? 1 : 0)} year(s) of returns and then held forward. Nothing here was fitted to the returns it earned.`
+      : "The frontier below was fitted to the whole window, so every point on it is a decision made with hindsight.",
+  );
+
+  if (focus) {
+    const o = focus.optimization;
+    const callouts = document.createElement("div");
+    callouts.className = "callouts";
+    [
+      ["Shrinkage applied", charts.percent(o.shrinkage_intensity, 1),
+        "toward a scaled identity, chosen by Ledoit-Wolf"],
+      ["Effective bets", charts.ratio(o.effective_bets, 1),
+        `across ${o.holdings.length} holdings`],
+      ["Diversification ratio", charts.ratio(o.diversification_ratio, 2),
+        "holdings' own risk versus the portfolio's"],
+      ["Estimated volatility", charts.percent(o.expected_volatility),
+        `realized was ${charts.percent(focus.summary.volatility)}`],
+      ["Turnover a year", charts.ratio(o.annual_turnover, 2),
+        `${o.reoptimizations} re-optimizations, costing ${charts.money(focus.summary.total_cost)}`],
+      ["Cap per holding", o.max_weight >= 1 ? "none" : charts.percent(o.max_weight, 0),
+        `covariance: ${o.estimator === "sample" ? "sample" : "Ledoit-Wolf"}`],
+    ].forEach(([k, v, sub]) => {
+      const cell = document.createElement("div");
+      cell.className = "callout";
+      cell.innerHTML = `<span class="k">${k}</span><span class="v">${v}</span><span class="sub">${sub}</span>`;
+      callouts.appendChild(cell);
+    });
+    node.appendChild(callouts);
+
+    const gap = document.createElement("p");
+    gap.className = "note";
+    gap.style.margin = "10px 0 20px";
+    const ratio = focus.summary.volatility / Math.max(o.expected_volatility, 1e-9);
+    gap.textContent = `${focus.name}: the risk model expected ${charts.percent(o.expected_volatility)} volatility `
+      + `and the portfolio realized ${charts.percent(focus.summary.volatility)}, `
+      + `${ratio > 1.15 ? `${charts.ratio(ratio, 1)}x the estimate — estimated covariance understates risk when correlations rise in stress, which is exactly when it matters` : "close to the estimate"}.`;
+    node.appendChild(gap);
+  }
+
+  const grid = document.createElement("div");
+  grid.className = "grid2";
+
+  if (result.frontier) {
+    const left = document.createElement("div");
+    left.innerHTML = '<h3>Risk and return, promised and delivered</h3>'
+      + '<p class="note" style="margin:4px 0 8px">The dashed curve is the frontier fitted to this whole window, so it is what a perfect forecast would have allowed. The filled dots are what each portfolio actually realized. The distance between them is the cost of not knowing the future.</p>';
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("class", "chart");
+    left.appendChild(svg);
+    state.renderers.push(charts.frontier(svg, {
+      curve: { volatilities: result.frontier.volatilities, returns: result.frontier.returns },
+      assets: result.frontier.assets,
+      realized: result.frontier.realized.map((point) => ({
+        ...point,
+        color: seriesColor(result.portfolios.find((p) => p.name === point.name) || {}),
+      })),
+    }));
+    grid.appendChild(left);
+  }
+
+  if (focus) {
+    const right = document.createElement("div");
+    const stability = focus.optimization.stability;
+    right.innerHTML = '<h3>Weight, risk, and how much of either is the sample</h3>'
+      + '<p class="note" style="margin:4px 0 10px">A holding\'s share of the money, its share of portfolio volatility, and the range its weight covers when the estimation window is resampled. At a minimum-variance solution the first two line up, because every holding\'s marginal risk is equal there.</p>';
+    const bars = document.createElement("div");
+    bars.className = "bars";
+    const holdings = [...focus.optimization.holdings].sort((a, b) => b.weight - a.weight);
+    const top = Math.max(...holdings.flatMap((h) => [h.weight, h.risk_share, h.weight_p95 || 0]), 0.01);
+    const pct = (v) => ((Math.max(v, 0) / top) * 100).toFixed(1);
+    holdings.forEach((holding) => {
+      const row = document.createElement("div");
+      row.className = "row";
+      const range = holding.weight_p05 !== null && holding.weight_p95 !== null
+        ? `<span style="display:block;height:3px;margin:2px 0 0;margin-left:${pct(holding.weight_p05)}%;width:${(Number(pct(holding.weight_p95)) - Number(pct(holding.weight_p05))).toFixed(1)}%;background:${seriesColor(focus)};opacity:.9"></span>`
+        : "";
+      row.innerHTML = `<span>${holding.ticker}</span>
+        <span class="track" style="height:auto;padding:2px 0">
+          <span style="display:block;height:6px;margin:1px 0;width:${pct(holding.weight)}%;background:${seriesColor(focus)}"></span>
+          <span style="display:block;height:6px;margin:1px 0;width:${pct(holding.risk_share)}%;background:${seriesColor(focus)};opacity:.45"></span>
+          ${range}
+        </span>
+        <span class="value">${charts.percent(holding.weight, 0)} / ${charts.percent(holding.risk_share, 0)}</span>`;
+      bars.appendChild(row);
+    });
+    right.appendChild(bars);
+    const key = document.createElement("p");
+    key.className = "note";
+    key.style.marginTop = "8px";
+    key.innerHTML = "Solid bar: share of money. Faded bar: share of risk. Thin line: 5th to 95th percentile of the weight across resampled windows."
+      + (stability ? ` Across ${stability.draws} resamples the weights moved by ${charts.percent(stability.mean_absolute_move, 1)} on average, and the widest holding spanned ${charts.percent(stability.widest_range, 0)} — that span is estimation error, not a view.` : "");
+    right.appendChild(key);
+    grid.appendChild(right);
+  }
+  node.appendChild(grid);
+
+  if (focus && backend.conformance) {
+    const panel = document.createElement("details");
+    panel.className = "advanced";
+    panel.style.marginTop = "20px";
+    panel.innerHTML = `<summary>Conformance report for ${escapeHtml(focus.optimization.label || focus.optimization.objective)}</summary>`
+      + '<p class="note" style="margin:8px 0">Every registered methodology runs the same battery before it ships: validity of the weights it returns, the constraints it honours, whether two identical calls agree, whether it depends on the order the assets arrive in, how it behaves on degenerate data, and whether it solves inside a walk-forward time budget.</p>'
+      + '<div class="conformance">Loading…</div>';
+    let loaded = false;
+    panel.addEventListener("toggle", async () => {
+      if (!panel.open || loaded) return;
+      loaded = true;
+      const host = panel.querySelector(".conformance");
+      try {
+        const report = await backend.conformance(focus.optimization.objective);
+        host.innerHTML = `<table class="data"><thead><tr><th>Check</th><th>Result</th><th>Measured</th></tr></thead><tbody>`
+          + report.checks.map((check) => `<tr style="cursor:default"><td class="label">${escapeHtml(check.name)}${check.required ? "" : ' <span class="faint">advisory</span>'}</td>`
+            + `<td class="${check.passed ? "gain" : "loss"}">${check.passed ? "pass" : "fail"}</td>`
+            + `<td class="label faint" style="text-align:left">${escapeHtml(check.detail)}</td></tr>`).join("")
+          + `</tbody></table>`;
+      } catch (error) {
+        host.innerHTML = `<p class="note">The harness could not be reached: ${escapeHtml(error.message)}</p>`;
+      }
+    });
+    node.appendChild(panel);
+  }
+
+  if (focus && focus.optimization.weight_history.dates.length > 2) {
+    const history = document.createElement("div");
+    history.style.marginTop = "22px";
+    history.innerHTML = `<h3>How much ${escapeHtml(focus.name)} moved</h3>`
+      + '<p class="note" style="margin:4px 0 10px">Every re-estimation shifts the weights. A rule that jumps around each month pays for it in trading costs, and it is a sign the estimates are noisier than the differences they are acting on.</p>';
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("class", "chart");
+    history.appendChild(svg);
+    const tickers = focus.optimization.weight_history.tickers;
+    const rows = focus.optimization.weight_history.weights;
+    state.renderers.push(charts.stacked(svg, {
+      dates: focus.optimization.weight_history.dates,
+      series: tickers.map((ticker, i) => ({
+        name: ticker,
+        color: `var(${SERIES[i % SERIES.length]})`,
+        values: rows.map((row) => row[i]),
+      })),
+    }));
+    node.appendChild(history);
+  }
+  return node;
+}
+
 function assumptionsPlate(result) {
   const settings = result.meta.settings;
   const quality = result.quality;
@@ -746,16 +1038,47 @@ function assumptionsPlate(result) {
       <dt>Sharpe</dt><dd>Risk-free rate of ${charts.percent(settings.risk_free_rate)} a year, converted to a daily equivalent. Constant across the window.</dd>
       <dt>Scenario engine</dt><dd>Block bootstrap: ${settings.paths.toLocaleString()} paths of ${settings.block_days}-session blocks resampled from this window's completed net returns, seed ${settings.seed}. Every portfolio is given the identical block positions.</dd>
       <dt>Starting balance for scenarios</dt><dd>${settings.scenario_basis === "equal" ? `The same ${charts.money(settings.initial_capital)} for every portfolio, so the comparison is about construction.` : "Each portfolio continues from its own final value, which answers a wealth-continuation question instead."}</dd>
+      ${result.portfolios.some((p) => p.optimization) ? `
+      <dt>Optimizer inputs</dt><dd>Covariance is estimated with Ledoit-Wolf shrinkage toward a scaled identity, which keeps the matrix well conditioned; an optimizer will otherwise load into whichever direction the sample happens to call calm. Expected returns, where an objective needs them, are shrunk toward the cross-sectional mean.</dd>
+      <dt>Out of sample</dt><dd>Every optimized weight was solved from returns before the day it was applied. The efficient frontier shown is the exception and is fitted to the whole window; it is drawn as the hindsight benchmark it is.</dd>
+      <dt>What optimization cannot fix</dt><dd>Estimation error. With a handful of assets and a few years of daily data, differences between candidate portfolios are often smaller than the error in the inputs that produced them, which is why equal weight is a serious competitor rather than a naive baseline.</dd>` : ""}
       <dt>Not modelled</dt><dd>Taxes, FX, inflation, dividends paid in cash, delistings, market impact beyond the fixed spread, and any change in the companies themselves.</dd>
       <dt>Survivorship</dt><dd>The tickers were chosen today, knowing which survived. That flatters any backtest and no correction is applied.</dd>
       <dt>What the fan is not</dt><dd>It repeats this window's return distribution, including its luck. It is not an estimate of future returns and the median at each date is not one investable path.</dd>
     </dl>`;
   node.appendChild(wrap);
 
+  const record = result.manifest;
+  if (record) {
+    const panel = document.createElement("details");
+    panel.className = "advanced";
+    panel.style.marginTop = "16px";
+    panel.innerHTML = `<summary>Provenance: run ${escapeHtml(record.run_id)}</summary>`
+      + '<p class="note" style="margin:8px 0">The run identifier is derived from the request, the price data, and the code that ran, so the same study on the same data always carries the same identifier. A different identifier means something changed, and these digests say what.</p>'
+      + '<table class="data"><tbody>'
+      + [["Run", record.run_id],
+         ["Request digest", record.request_sha256 ? record.request_sha256.slice(0, 24) : "unavailable"],
+         ["Price data", `${record.data.rows.toLocaleString()} rows, ${record.data.tickers.length} tickers, ${record.data.first_date} to ${record.data.last_date}`],
+         ["Data digest", record.data.sha256 ? record.data.sha256.slice(0, 24) : "server only"],
+         ["Source", record.data.source],
+         ["Engine", record.code_sha256
+           ? `${record.engine_version}, code ${record.code_sha256.slice(0, 16)}`
+           : record.engine_version],
+         ["Python", record.environment.python
+           ? `${record.environment.python} · ` + Object.entries(record.environment.packages)
+             .filter(([, v]) => v).map(([k, v]) => `${k} ${v}`).join(", ")
+           : "server only"],
+         ["Generated", record.generated_at]]
+        .map(([k, v]) => `<tr style="cursor:default"><td class="label">${k}</td><td class="label faint" style="text-align:left">${escapeHtml(String(v))}</td></tr>`).join("")
+      + "</tbody></table>"
+      + (record.partial ? `<p class="note" style="margin-top:8px">${escapeHtml(record.partial)}</p>` : "");
+    node.appendChild(panel);
+  }
+
   const footer = document.createElement("p");
   footer.className = "footer";
   footer.style.marginTop = "18px";
-  footer.innerHTML = `Generated ${escapeHtml(result.meta.generated_at)} by engine ${escapeHtml(result.meta.engine_version)}. Research tooling for studying historical data and stated assumptions — not investment advice, and not a recommendation to buy or sell anything. Past results do not establish future suitability.`;
+  footer.innerHTML = `Run ${escapeHtml(result.meta.run_id || "—")}, generated ${escapeHtml(result.meta.generated_at)} by engine ${escapeHtml(result.meta.engine_version)}. Research tooling for studying historical data and stated assumptions — not investment advice, and not a recommendation to buy or sell anything. Past results do not establish future suitability.`;
   node.appendChild(footer);
   return node;
 }
@@ -774,11 +1097,21 @@ async function boot() {
   start.setFullYear(start.getFullYear() - 10);
   state.settings.end = backend.defaultEnd || end.toISOString().slice(0, 10);
   state.settings.start = backend.defaultStart || start.toISOString().slice(0, 10);
-  loadPreset(preset);
+  const shared = location.hash.match(/setup=([A-Za-z0-9+/=_-]+)/);
+  let restored = false;
+  if (shared) {
+    try {
+      decodeSetup(shared[1]);
+      restored = true;
+    } catch (error) {
+      console.warn("Ignoring an unreadable setup link:", error.message);
+    }
+  }
+  if (!restored) loadPreset(preset);
   bindRail();
   writeRail();
   showMode();
-  if (backend.autorun) run();
+  if (backend.autorun || restored) run();
 }
 
 boot();

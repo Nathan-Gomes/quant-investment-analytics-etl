@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 import numpy as np
 import pandas as pd
 
-from . import engine
+from . import engine, optimize, provenance, strategies
 from .engine import Portfolio, Settings
 
 ENGINE_VERSION = "1.0.0"
@@ -56,6 +56,7 @@ def analyze(
     start: str | None = None,
     end: str | None = None,
     source_note: str = "",
+    request: dict | None = None,
 ) -> dict:
     settings.validate()
     if not portfolios:
@@ -81,13 +82,20 @@ def analyze(
             "ticker with the shortest history."
         )
 
+    for portfolio in portfolios:
+        portfolio.validate()
     needs_calibration = any(p.scheme == "inverse_volatility" for p in portfolios)
-    warmup = min(settings.calibration_days, len(wide) // 3) if needs_calibration else 0
-    if needs_calibration and warmup < settings.calibration_days:
+    estimation_need = max([p.estimation_days for p in portfolios if p.scheme == "optimized"], default=0)
+    # Any portfolio that has to be estimated before it can be held needs history
+    # in front of the study window. Every portfolio then starts on the same day,
+    # so the comparison stays like for like.
+    requested_warmup = max(settings.calibration_days if needs_calibration else 0, estimation_need)
+    warmup = min(requested_warmup, len(wide) // 3) if requested_warmup else 0
+    if requested_warmup and warmup < requested_warmup:
         warnings.append(
-            f"Inverse-volatility weights were calibrated on {warmup} sessions rather than "
-            f"{settings.calibration_days}, because the window is short. Those calibration sessions "
-            "are excluded from every reported result."
+            f"Weights were estimated on {warmup} sessions rather than the {requested_warmup} requested, "
+            "because the window is short. Those sessions are used only to set the opening weights and are "
+            "excluded from every reported result."
         )
     returns_all = wide.pct_change(fill_method=None)
     calibration = returns_all.iloc[1:warmup + 1] if warmup else returns_all.iloc[1:]
@@ -113,10 +121,63 @@ def analyze(
             Portfolio(name=benchmark_name, weights={settings.benchmark: 1.0}, scheme="custom")
         ]
 
+    columns = list(wide.columns)
+    returns_matrix = returns_all.to_numpy(dtype=float)
+    optimizer_state: dict[str, dict] = {}
+
+    def make_provider(portfolio: Portfolio):
+        """Weights re-solved at each rebalance from the trailing window only.
+
+        ``position`` is the offset inside the study window of the session being
+        traded. The slice ends at that session's close and never reaches past
+        it, which is what makes the result walk-forward rather than fitted.
+        """
+        chosen = [c for c in columns if c in portfolio.weights]
+        if len(chosen) < 2:
+            raise ValueError(f"{portfolio.name}: optimization needs at least two holdings.")
+        positions = [columns.index(c) for c in chosen]
+        constraints = optimize.Constraints(max_weight=portfolio.max_weight)
+        constraints.validate(len(chosen))
+        state = {"previous": None, "last": None, "history": [], "universe": chosen}
+        optimizer_state[portfolio.name] = state
+
+        strategy = strategies.get(portfolio.objective)
+        state["strategy"] = strategy
+        state["constraints"] = constraints
+        state["positions"] = positions
+
+        def provider(position: int) -> np.ndarray:
+            end = warmup + position + 1
+            start = max(1, end - portfolio.estimation_days)
+            sample = returns_matrix[start:end][:, positions]
+            context = strategies.Context(
+                returns=sample,
+                constraints=constraints,
+                risk_free_rate=settings.risk_free_rate,
+                previous_weights=state["previous"],
+                estimator=portfolio.estimator,
+                volatility_target=portfolio.volatility_target,
+                transaction_cost_bps=settings.transaction_cost_bps,
+                effort="fast",
+                parameters=dict(portfolio.parameters),
+            )
+            state["last_context"] = context
+            solved = strategies.solve_with_diagnostics(strategy, context)
+            state["previous"] = solved["weights"]
+            state["last"] = solved
+            state["history"].append({"date": wide.index[end - 1], "weights": solved["weights"]})
+            full = np.zeros(len(columns))
+            full[positions] = solved["weights"]
+            return full
+
+        return provider
+
     results = []
     for portfolio in portfolios:
         requested_total = sum(portfolio.weights.values()) if portfolio.scheme == "custom" else 1.0
-        target = portfolio.resolve(list(wide.columns), calibration)
+        provider = make_provider(portfolio) if portfolio.scheme == "optimized" else None
+        target = (pd.Series(0.0, index=columns) if provider
+                  else portfolio.resolve(columns, calibration))
         # Weights arrive either as fractions (0.35) or as percentages (35). Both
         # are normalized; only a total that is neither is worth flagging.
         if portfolio.scheme == "custom" and min(abs(requested_total - 1), abs(requested_total - 100)) > 0.005:
@@ -125,7 +186,14 @@ def analyze(
                 "so they were rescaled to 100% while keeping their proportions."
             )
         schedule = "none" if portfolio.name == benchmark_name else settings.rebalance
-        run = engine.run_backtest(window, target, settings, schedule=schedule)
+        if provider and schedule == "none":
+            raise ValueError(
+                f"{portfolio.name}: an optimized portfolio needs a rebalance schedule, because that is "
+                "when it re-estimates. Choose monthly, quarterly or annual."
+            )
+        run = engine.run_backtest(window, target, settings, schedule=schedule, target_provider=provider)
+        if provider:
+            target = pd.Series(run["target_history"][0]["weights"], index=columns)
         results.append((portfolio, target, run))
 
     # One set of block positions, shared by every portfolio: the differences
@@ -209,6 +277,7 @@ def analyze(
                 "summary": scenario["summary"],
                 "histogram": {"counts": [int(c) for c in counts]},
             },
+            "optimization": _optimizer_report(portfolio, optimizer_state.get(portfolio.name), run, meta),
             "versus_benchmark": (
                 engine.paired_comparison(
                     scenario["terminal"], benchmark_terminal, portfolio.name, benchmark_name
@@ -221,10 +290,18 @@ def analyze(
     keep = _thin(len(first["dates"]))
     asset_rows, asset_returns = _asset_table(window, meta, settings)
     correlation = asset_returns.corr()
+    frontier = _frontier_report(window, portfolios, results, settings, benchmark_name, asset_rows)
 
+    record = provenance.manifest(
+        request if request is not None else _reconstruct_request(portfolios, settings, start, end),
+        wide_all.reset_index().melt(id_vars="date", var_name="ticker", value_name="adjusted_price").dropna(),
+        ENGINE_VERSION, source_note,
+    )
     return _clean({
+        "manifest": record,
         "meta": {
-            "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "run_id": record["run_id"],
+            "generated_at": record["generated_at"],
             "engine_version": ENGINE_VERSION,
             "source": source_note,
             "window_start": window.index[0].date().isoformat(),
@@ -253,12 +330,158 @@ def analyze(
             "histogram_edges": _round(edges, 2),
         },
         "assets": asset_rows,
+        "frontier": frontier,
         "correlation": {
             "tickers": list(correlation.columns),
             "matrix": [[round(float(v), 3) for v in row] for row in correlation.to_numpy()],
         },
         "portfolios": payload_portfolios,
     })
+
+
+def _optimizer_report(portfolio: Portfolio, state: dict | None, run: dict, meta: dict) -> dict | None:
+    """What the optimizer was given, what it did, how much it churned, and how
+    much of the answer is the sample rather than the signal."""
+    if not state or not state.get("last"):
+        return None
+    solved = state["last"]
+    universe = state["universe"]
+    decomposition = solved["risk"]
+    history = state["history"]
+    rebalances = max(len(history) - 1, 0)
+    turnover = float(run["turnover"].sum())
+    stability = _weight_stability(state)
+    return {
+        "objective": portfolio.objective,
+        "label": strategies.get(portfolio.objective).label,
+        "estimator": portfolio.estimator,
+        "estimation_days": int(portfolio.estimation_days),
+        "max_weight": float(portfolio.max_weight),
+        "reoptimizations": int(len(history)),
+        "turnover_per_rebalance": turnover / rebalances if rebalances else 0.0,
+        "annual_turnover": turnover / max(run["summary"]["years"], 1e-9),
+        # Estimated at the final rebalance, so these describe the portfolio as held today.
+        "shrinkage_intensity": float(solved["shrinkage_intensity"]),
+        "mean_shrinkage_intensity": float(solved["mean_shrinkage_intensity"]),
+        "expected_volatility": float(solved["expected_volatility"]),
+        "expected_return": float(solved["expected_return"]),
+        "diversification_ratio": float(decomposition["diversification_ratio"]),
+        "effective_bets": float(decomposition["effective_bets"]),
+        "holdings": [
+            {
+                "ticker": ticker,
+                "weight": float(solved["weights"][i]),
+                "risk_share": float(decomposition["share"][i]),
+                "marginal_risk": float(decomposition["marginal"][i]),
+                "weight_p05": stability["percentiles"]["p05"][i] if stability else None,
+                "weight_p95": stability["percentiles"]["p95"][i] if stability else None,
+            }
+            for i, ticker in enumerate(universe)
+        ],
+        "stability": stability,
+        "weight_history": {
+            "dates": [row["date"].date().isoformat() for row in history],
+            "tickers": universe,
+            "weights": [[round(float(v), 6) for v in row["weights"]] for row in history],
+        },
+    }
+
+
+def _weight_stability(state: dict) -> dict | None:
+    """Re-solve on bootstrapped samples of the final estimation window.
+
+    The weights the optimizer reports are one draw from a sampling distribution.
+    This measures the width of that distribution, which is the honest way to say
+    how much of the difference between two candidate portfolios is real. It uses
+    the same routine the conformance harness applies to every methodology.
+    """
+    context = state.get("last_context")
+    strategy = state.get("strategy")
+    if context is None or strategy is None:
+        return None
+    try:
+        from .conformance import weight_stability
+
+        measured = weight_stability(strategy, context.returns, context.constraints, draws=20)
+    except Exception:  # noqa: BLE001 - diagnostics must never sink an analysis
+        return None
+    if not measured.get("percentiles"):
+        return None
+    return measured
+
+
+def _frontier_report(window, portfolios, results, settings, benchmark_name, asset_rows) -> dict | None:
+    """The frontier over the whole window, with what each portfolio realized.
+
+    This frontier is fitted to the same data it is drawn against, so every point
+    on it is a decision made with hindsight. It is here precisely so the
+    walk-forward portfolios can be plotted against it: the gap between the curve
+    and where a portfolio actually landed is the cost of not knowing the future,
+    and it is the most honest thing this app can show about optimization.
+    """
+    optimized = [p for p in portfolios if p.scheme == "optimized"]
+    universe = list(optimized[0].weights) if optimized else [
+        row["ticker"] for row in asset_rows if row["ticker"] != (settings.benchmark or "")
+    ]
+    universe = [t for t in window.columns if t in universe]
+    if len(universe) < 2:
+        return None
+    cap = min([p.max_weight for p in optimized], default=1.0)
+    returns = window[universe].pct_change(fill_method=None).iloc[1:].to_numpy(dtype=float)
+    covariance, intensity = optimize.ledoit_wolf_covariance(returns)
+    means = returns.mean(axis=0) * engine.TRADING_DAYS
+    constraints = optimize.Constraints(max_weight=cap)
+    try:
+        curve = optimize.efficient_frontier(covariance, means, constraints, points=24)
+    except ValueError:
+        return None
+    return {
+        "universe": universe,
+        "max_weight": cap,
+        "shrinkage_intensity": float(intensity),
+        "in_sample": True,
+        "volatilities": [round(v, 5) for v in curve["volatilities"]],
+        "returns": [round(r, 5) for r in curve["returns"]],
+        "assets": [
+            {"ticker": ticker,
+             "volatility": float(np.sqrt(covariance[i, i])),
+             "expected_return": float(means[i])}
+            for i, ticker in enumerate(universe)
+        ],
+        "realized": [
+            {"name": portfolio.name,
+             "is_benchmark": portfolio.name == benchmark_name,
+             "volatility": run["summary"]["volatility"],
+             "annualized_return": run["summary"]["annualized_return"]}
+            for portfolio, _target, run in results
+        ],
+    }
+
+
+def _reconstruct_request(portfolios, settings, start, end) -> dict:
+    """The request as the engine understood it, for callers that did not pass one."""
+    return {
+        "portfolios": [
+            {"name": p.name, "weights": {k: float(v) for k, v in sorted(p.weights.items())},
+             "scheme": p.scheme, "objective": p.objective, "estimation_days": p.estimation_days,
+             "max_weight": p.max_weight, "estimator": p.estimator,
+             "parameters": dict(sorted(p.parameters.items()))}
+            for p in portfolios
+        ],
+        "start": start, "end": end,
+        "settings": {
+            "initial_capital": settings.initial_capital,
+            "transaction_cost_bps": settings.transaction_cost_bps,
+            "risk_free_rate": settings.risk_free_rate,
+            "rebalance": settings.rebalance,
+            "benchmark": settings.benchmark,
+            "horizon_years": settings.horizon_years,
+            "paths": settings.paths,
+            "block_days": settings.block_days,
+            "seed": settings.seed,
+            "scenario_basis": settings.scenario_basis,
+        },
+    }
 
 
 def _tracking_error(run, results, benchmark_name) -> float | None:

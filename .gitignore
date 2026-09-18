@@ -1,5 +1,4 @@
 .venv/
-app/cache/
 __pycache__/
 .pytest_cache/
 output/*.db
@@ -17,3 +16,7 @@ output/security_daily_analytics.csv
 .ipynb_checkpoints/
 data/synthetic_prices.csv
 data/synthetic_prices.json
+
+# Web app
+app/cache/
+dist/

@@ -76,9 +76,25 @@ def _fresh(path: Path) -> bool:
     return age < CACHE_MAX_AGE_HOURS * 3600
 
 
+def require_provider():
+    """Check the price provider once, so a missing package is reported once.
+
+    Without this the import error is raised per ticker and the person sees the
+    same Python message repeated across the whole universe.
+    """
+    try:
+        import yfinance as yf
+    except ImportError as error:  # pragma: no cover - environment dependent
+        raise ValueError(
+            "The yfinance package is not installed, so live prices are unavailable. "
+            "Run `pip install -r requirements.txt`, or switch the data source to the bundled dataset."
+        ) from error
+    return yf
+
+
 def download(ticker: str, start: str, end: str) -> tuple[pd.DataFrame, dict]:
     """One ticker's adjusted closes, from the cache when it is recent enough."""
-    import yfinance as yf
+    yf = require_provider()
 
     CACHE.mkdir(parents=True, exist_ok=True)
     path = _cache_path(ticker)
@@ -135,6 +151,7 @@ def load(tickers: list[str], start: str, end: str, source: str = "auto") -> Pric
         raise ValueError("Up to 25 tickers can be studied at once.")
     if source == "bundled":
         return load_bundled(tickers)
+    require_provider()
 
     frames, profiles, failures = [], [], []
     for ticker in tickers:

@@ -21,9 +21,10 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import marketdata
+from . import conformance, marketdata, strategies
 from .analysis import ENGINE_VERSION, analyze
 from .engine import SCHEDULES, SCHEMES, Portfolio, Settings
+from .optimize import OBJECTIVES
 
 STATIC = Path(__file__).resolve().parent / "static"
 DEFAULT_SOURCE = os.environ.get("PORTFOLIO_LAB_SOURCE", "auto")
@@ -49,6 +50,13 @@ class PortfolioRequest(BaseModel):
     name: str = Field(min_length=1, max_length=60)
     weights: dict[str, float] = Field(default_factory=dict)
     scheme: str = "custom"
+    # Used only when scheme is "optimized".
+    objective: str = "minimum_variance"
+    estimation_days: int = Field(default=252, ge=60, le=2520)
+    max_weight: float = Field(default=1.0, gt=0, le=1)
+    estimator: str = "ledoit_wolf"
+    volatility_target: float | None = None
+    parameters: dict = Field(default_factory=dict)
 
 
 class AnalysisRequest(BaseModel):
@@ -76,7 +84,38 @@ def health() -> dict:
         "default_source": DEFAULT_SOURCE,
         "schedules": list(SCHEDULES),
         "schemes": list(SCHEMES),
+        "objectives": sorted(strategies.REGISTRY),
     }
+
+
+@api.get("/api/strategies")
+def strategy_catalogue() -> dict:
+    """The methodologies that are registered, straight from the registry.
+
+    The interface builds its menu from this, so a researcher's new methodology
+    appears in the app by registering it, with nothing else to edit.
+    """
+    return {"strategies": strategies.catalogue()}
+
+
+_CONFORMANCE_CACHE: dict[str, dict] = {}
+
+
+@api.get("/api/conformance")
+def conformance_report(strategy: str | None = None) -> dict:
+    """Run the conformance battery and report it, check by check.
+
+    Cached per strategy: the battery is deterministic, so within one process the
+    answer cannot change unless the code does.
+    """
+    names = [strategy] if strategy else sorted(strategies.REGISTRY)
+    unknown = [n for n in names if n not in strategies.REGISTRY]
+    if unknown:
+        raise HTTPException(404, f"No strategy named '{unknown[0]}'.")
+    for name in names:
+        if name not in _CONFORMANCE_CACHE:
+            _CONFORMANCE_CACHE[name] = conformance.evaluate(strategies.get(name)).to_dict()
+    return {"reports": [_CONFORMANCE_CACHE[name] for name in names]}
 
 
 @api.get("/api/universe")
@@ -92,6 +131,10 @@ def run_analysis(request: AnalysisRequest) -> JSONResponse:
     for portfolio in request.portfolios:
         if portfolio.scheme not in SCHEMES:
             raise HTTPException(400, f"Unknown weighting scheme '{portfolio.scheme}'.")
+        if portfolio.scheme == "optimized" and portfolio.objective not in strategies.REGISTRY:
+            raise HTTPException(
+                400, f"Unknown methodology '{portfolio.objective}'. "
+                     f"Registered: {', '.join(sorted(strategies.REGISTRY))}.")
         # A zero weight is not a holding, so its ticker never enters the universe
         # and cannot fail a run over a symbol that carries nothing.
         portfolio.weights = {
@@ -129,13 +172,17 @@ def run_analysis(request: AnalysisRequest) -> JSONResponse:
         )
         payload = analyze(
             priceset.prices,
-            [Portfolio(name=p.name, weights=dict(p.weights), scheme=p.scheme)
+            [Portfolio(name=p.name, weights=dict(p.weights), scheme=p.scheme,
+                       objective=p.objective, estimation_days=p.estimation_days,
+                       max_weight=p.max_weight, estimator=p.estimator,
+                       volatility_target=p.volatility_target, parameters=dict(p.parameters))
              for p in request.portfolios],
             settings,
             metadata=priceset.metadata,
             start=start,
             end=end,
             source_note=priceset.note,
+            request=request.model_dump(exclude_none=False),
         )
     except ValueError as error:
         raise HTTPException(400, str(error)) from error
