@@ -10,11 +10,12 @@ reviewer should see next to the numbers rather than buried in a footnote.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from time import perf_counter
 
 import numpy as np
 import pandas as pd
 
-from . import engine, optimize, provenance, strategies
+from . import engine, optimize, provenance, riskmodel, strategies
 from .engine import Portfolio, Settings
 
 ENGINE_VERSION = "1.0.0"
@@ -57,10 +58,25 @@ def analyze(
     end: str | None = None,
     source_note: str = "",
     request: dict | None = None,
+    progress=None,
 ) -> dict:
     settings.validate()
     if not portfolios:
         raise ValueError("Add at least one portfolio.")
+
+    started = perf_counter()
+    timings: dict[str, float] = {}
+
+    def phase(name: str, detail: str = "") -> None:
+        """Record how long each stage took and, if anyone is listening, say so.
+
+        The timings are returned with the results, so a slow run can be diagnosed
+        from the payload instead of guessed at.
+        """
+        elapsed = (perf_counter() - started) * 1000
+        timings[name] = round(elapsed - sum(timings.values()), 1)
+        if progress:
+            progress({"phase": name, "detail": detail, "elapsed_ms": round(elapsed, 1)})
 
     warnings: list[str] = []
     wide_all = engine.to_wide(prices)
@@ -84,6 +100,7 @@ def analyze(
 
     for portfolio in portfolios:
         portfolio.validate()
+    phase("align", f"{len(wide)} shared sessions across {len(wide.columns)} securities")
     needs_calibration = any(p.scheme == "inverse_volatility" for p in portfolios)
     estimation_need = max([p.estimation_days for p in portfolios if p.scheme == "optimized"], default=0)
     # Any portfolio that has to be estimated before it can be held needs history
@@ -153,6 +170,8 @@ def analyze(
             context = strategies.Context(
                 returns=sample,
                 constraints=constraints,
+                benchmark=(np.asarray(portfolio.parameters["benchmark_weights"], dtype=float)
+                           if portfolio.parameters.get("benchmark_weights") else None),
                 risk_free_rate=settings.risk_free_rate,
                 previous_weights=state["previous"],
                 estimator=portfolio.estimator,
@@ -163,6 +182,8 @@ def analyze(
             )
             state["last_context"] = context
             solved = strategies.solve_with_diagnostics(strategy, context)
+            state["last_risk_model"] = context.risk_model()
+            state["last_solution"] = context._cache.get("solution")
             state["previous"] = solved["weights"]
             state["last"] = solved
             state["history"].append({"date": wide.index[end - 1], "weights": solved["weights"]})
@@ -173,7 +194,11 @@ def analyze(
         return provider
 
     results = []
-    for portfolio in portfolios:
+    for number, portfolio in enumerate(portfolios, start=1):
+        if progress:
+            progress({"phase": "backtest", "elapsed_ms": round((perf_counter() - started) * 1000, 1),
+                      "detail": f"{portfolio.name} ({number} of {len(portfolios)})",
+                      "step": number, "steps": len(portfolios)})
         requested_total = sum(portfolio.weights.values()) if portfolio.scheme == "custom" else 1.0
         provider = make_provider(portfolio) if portfolio.scheme == "optimized" else None
         target = (pd.Series(0.0, index=columns) if provider
@@ -195,6 +220,7 @@ def analyze(
         if provider:
             target = pd.Series(run["target_history"][0]["weights"], index=columns)
         results.append((portfolio, target, run))
+    phase("backtest", f"{len(results)} portfolios walked through {len(window)} sessions")
 
     # One set of block positions, shared by every portfolio: the differences
     # between them come from construction, not from a luckier sample.
@@ -210,7 +236,11 @@ def analyze(
     forward_dates = engine.scenario_dates(window.index[-1], horizon_days, settings.horizon_years)
 
     scenarios = {}
-    for portfolio, _target, run in results:
+    for number, (portfolio, _target, run) in enumerate(results, start=1):
+        if progress:
+            progress({"phase": "scenarios", "elapsed_ms": round((perf_counter() - started) * 1000, 1),
+                      "detail": f"{portfolio.name} ({number} of {len(results)})",
+                      "step": number, "steps": len(results)})
         start_value = (
             float(run["summary"]["final_value"]) if settings.scenario_basis == "continuation"
             else float(settings.initial_capital)
@@ -219,6 +249,7 @@ def analyze(
             run["net_returns"][1:], index, start_value, grid_points=settings.grid_points
         )
 
+    phase("scenarios", f"{settings.paths:,} paths for each of {len(results)} portfolios")
     terminal_pool = np.concatenate([s["terminal"] for s in scenarios.values()])
     hist_range = (float(np.quantile(terminal_pool, 0.005)), float(np.quantile(terminal_pool, 0.98)))
     edges = np.linspace(hist_range[0], max(hist_range[1], hist_range[0] * 1.01), 41)
@@ -290,7 +321,11 @@ def analyze(
     keep = _thin(len(first["dates"]))
     asset_rows, asset_returns = _asset_table(window, meta, settings)
     correlation = asset_returns.corr()
+    if progress:
+        progress({"phase": "diagnostics", "elapsed_ms": round((perf_counter() - started) * 1000, 1),
+                  "detail": "risk decomposition and the efficient frontier"})
     frontier = _frontier_report(window, portfolios, results, settings, benchmark_name, asset_rows)
+    phase("diagnostics", "frontier, correlations and weight stability")
 
     record = provenance.manifest(
         request if request is not None else _reconstruct_request(portfolios, settings, start, end),
@@ -309,6 +344,7 @@ def analyze(
             "trading_days": int(len(window)),
             "years": round(float((len(window) - 1) / engine.TRADING_DAYS), 2),
             "calibration_days": int(warmup),
+            "timings_ms": {**timings, "total": round((perf_counter() - started) * 1000, 1)},
             "benchmark": benchmark_name,
             "settings": {
                 "initial_capital": settings.initial_capital,
@@ -351,8 +387,20 @@ def _optimizer_report(portfolio: Portfolio, state: dict | None, run: dict, meta:
     rebalances = max(len(history) - 1, 0)
     turnover = float(run["turnover"].sum())
     stability = _weight_stability(state)
+    risk = state.get("last_risk_model")
+    convex_solution = state.get("last_solution")
     return {
         "objective": portfolio.objective,
+        "risk_model": (riskmodel.report(risk, solved["weights"]) if risk else None),
+        "solver": ({
+            "name": convex_solution.solver,
+            "status": convex_solution.status,
+            "seconds": convex_solution.solve_seconds,
+            "binding_constraints": convex_solution.binding,
+            "shadow_prices": {k: v for k, v in convex_solution.duals.items() if v > 1e-7},
+            "reformulation": convex_solution.diagnostics.get("reformulation"),
+            "note": convex_solution.diagnostics.get("note"),
+        } if convex_solution else None),
         "label": strategies.get(portfolio.objective).label,
         "estimator": portfolio.estimator,
         "estimation_days": int(portfolio.estimation_days),

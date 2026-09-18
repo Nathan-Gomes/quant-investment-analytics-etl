@@ -17,7 +17,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,7 +29,12 @@ ROOT = Path(__file__).resolve().parents[1]
 CACHE = ROOT / "app" / "cache"
 BUNDLED_PRICES = ROOT / "data" / "cached_prices.csv"
 BUNDLED_SECURITIES = ROOT / "data" / "securities.csv"
-CACHE_MAX_AGE_HOURS = 12
+CACHE_MAX_AGE_HOURS = float(os.environ.get("STRATA_CACHE_HOURS",
+                            os.environ.get("PORTFOLIO_LAB_CACHE_HOURS", 12)))
+# Downloads are network-bound, so they overlap rather than queue. Kept modest
+# because a provider that is being polite to us deserves the same in return.
+MAX_PARALLEL_DOWNLOADS = int(os.environ.get("STRATA_DOWNLOAD_WORKERS",
+                             os.environ.get("PORTFOLIO_LAB_DOWNLOAD_WORKERS", 8)))
 
 
 @dataclass
@@ -153,13 +160,28 @@ def load(tickers: list[str], start: str, end: str, source: str = "auto") -> Pric
         return load_bundled(tickers)
     require_provider()
 
-    frames, profiles, failures = [], [], []
-    for ticker in tickers:
+    def fetch(ticker: str):
         try:
-            frame, info = download(ticker, start, end)
+            return ticker, download(ticker, start, end), None
         except Exception as error:  # noqa: BLE001 - reported to the caller verbatim
-            failures.append(f"{ticker}: {error}")
+            return ticker, None, f"{ticker}: {error}"
+
+    # Nine tickers fetched one after another is nine round trips of latency, and
+    # on a cold cache that was the bulk of the wait. Results are reassembled in
+    # the requested order so the outcome does not depend on which returned first.
+    workers = min(MAX_PARALLEL_DOWNLOADS, max(1, len(tickers)))
+    if workers > 1 and len(tickers) > 1:
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="prices") as pool:
+            fetched = list(pool.map(fetch, tickers))
+    else:
+        fetched = [fetch(ticker) for ticker in tickers]
+
+    frames, profiles, failures = [], [], []
+    for ticker, result, failure in fetched:
+        if failure:
+            failures.append(failure)
             continue
+        frame, info = result
         frames.append(frame)
         profiles.append({
             "ticker": ticker,

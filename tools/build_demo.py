@@ -2,7 +2,7 @@
 
     python tools/build_demo.py
 
-The result, ``dist/portfolio-lab-demo.html``, opens straight from disk and needs
+The result, ``dist/strata-demo.html``, opens straight from disk and needs
 no server: the backtest and the block bootstrap run in the page. It carries the
 nine securities in ``data/cached_prices.csv``. For any other ticker, run the
 served app, which fetches prices through yfinance.
@@ -63,14 +63,13 @@ def build() -> Path:
 
     # The demo cannot reach a price provider, so say so where the control sits.
     html = html.replace(
-        "Historical backtest and block-bootstrap scenarios, on the engine from the "
-        "Quantitative Investment Analytics pipeline.",
-        "Historical backtest and block-bootstrap scenarios. This demo runs entirely in your browser "
-        "on the frozen 2018–2026 research dataset; the full app fetches any ticker through Yahoo Finance.",
+        "Historical backtest, block-bootstrap scenarios and walk-forward portfolio construction.",
+        "This demo runs entirely in your browser on the frozen 2018–2026 research dataset. "
+        "The full app fetches any ticker through Yahoo Finance and runs the Python solvers.",
     )
 
     DIST.mkdir(exist_ok=True)
-    out = DIST / "portfolio-lab-demo.html"
+    out = DIST / "strata-demo.html"
     out.write_text(html)
     return out
 

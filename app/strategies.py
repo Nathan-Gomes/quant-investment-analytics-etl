@@ -24,6 +24,7 @@ from typing import Callable
 
 import numpy as np
 
+from . import convex, riskmodel
 from .optimize import (
     Constraints,
     inverse_volatility_weights,
@@ -57,17 +58,69 @@ class Context:
     volatility_target: float | None = None
     transaction_cost_bps: float = 10.0
     effort: str = "full"
+    benchmark: np.ndarray | None = None
     parameters: dict = field(default_factory=dict)
+    _cache: dict = field(default_factory=dict, repr=False)
 
     @property
     def assets(self) -> int:
         return int(self.returns.shape[1])
 
     def covariance(self) -> tuple[np.ndarray, float]:
-        """The risk model, chosen once so every strategy uses the same one."""
-        if self.estimator == "sample":
-            return sample_covariance(self.returns), 0.0
-        return ledoit_wolf_covariance(self.returns)
+        """The risk model as a plain matrix, for strategies that want one."""
+        model = self.risk_model()
+        return model.covariance, model.shrinkage_intensity
+
+    def risk_model(self, kind: str | None = None) -> riskmodel.RiskModel:
+        """The estimated risk model, built once and shared.
+
+        ``sample``, ``ledoit_wolf`` or ``statistical_factor``. The factor model
+        is what lets the same code run on a universe of hundreds, since the
+        quadratic form goes through the exposures rather than a dense matrix.
+        """
+        kind = kind or self.parameters.get("risk_model") or self.estimator
+        key = f"risk:{kind}"
+        if key not in self._cache:
+            self._cache[key] = riskmodel.build(
+                self.returns, kind, factors=self.parameters.get("factors"))
+        return self._cache[key]
+
+    def mandate(self, **overrides) -> convex.Mandate:
+        """What the portfolio is allowed to be, assembled from the request.
+
+        The objective is the researcher's; the mandate is the desk's. Keeping
+        them apart is what lets a new methodology inherit every limit the book
+        already runs under without knowing they exist.
+        """
+        parameters = self.parameters
+        groups = [
+            convex.Group(name=g["name"], members=list(g["members"]),
+                         minimum=float(g.get("minimum", 0.0)), maximum=float(g.get("maximum", 1.0)))
+            for g in parameters.get("groups", [])
+        ]
+        # Position bounds, group limits and a turnover budget are mandate items:
+        # they apply to whatever is held, whoever constructed it. A tracking-error
+        # ceiling and a cost term change what is being optimized, so a strategy
+        # has to ask for them explicitly rather than inheriting them from the
+        # parameter bag — otherwise "minimum variance" quietly stops being it.
+        settings = dict(
+            max_weight=self.constraints.max_weight,
+            min_weight=self.constraints.min_weight,
+            groups=groups,
+            benchmark=self.benchmark,
+            tracking_error_limit=None,
+            # There is nothing to move from at the opening rebalance, so a
+            # turnover budget has nothing to constrain and is dropped rather
+            # than rejected.
+            turnover_budget=(parameters.get("turnover_budget")
+                             if self.previous_weights is not None else None),
+            previous_weights=self.previous_weights,
+            spread_bps=0.0,
+            impact_coefficient=0.0,
+            impact_exponent=float(parameters.get("impact_exponent", 1.5)),
+        )
+        settings.update(overrides)
+        return convex.Mandate(**settings)
 
     def expected_returns(self, shrink: bool = True) -> tuple[np.ndarray, float]:
         return shrink_means(self.returns, None if shrink else 0.0)
@@ -100,6 +153,11 @@ class Strategy:
     needs_expected_returns: bool = False
     needs_parameters: tuple[str, ...] = ()
     scale_invariant: bool = True     # multiplying all returns by k must not move weights
+    # How closely two runs of the same problem should agree. A local search on a
+    # smooth objective reproduces to machine precision; an interior-point solver
+    # reproduces to its convergence tolerance, which is a documented property of
+    # the method rather than a defect to be waved through.
+    numerical_tolerance: float = 1e-6
     author: str = "core"
     version: str = "1.0"
 
@@ -247,6 +305,130 @@ register(Strategy(
     solve=_target_volatility,
     needs_expected_returns=True,
     needs_parameters=("volatility_target",),
+    scale_invariant=False,
+))
+
+
+# --------------------------------------------------------------------------- #
+# The same objectives as convex programs
+# --------------------------------------------------------------------------- #
+# Written in disciplined convex form and solved by a conic solver, these return a
+# certified global optimum, dual variables for every constraint, and a definite
+# infeasibility answer. They also carry the constraint set a real mandate has:
+# group limits, turnover budgets, tracking-error ceilings, and market impact.
+
+def _record(context: Context, solution: convex.Solution) -> np.ndarray:
+    """Keep the solver's own report where the caller can read it."""
+    context._cache["solution"] = solution
+    return solution.weights
+
+
+register(Strategy(
+    name="minimum_variance_convex",
+    numerical_tolerance=1e-8,
+    label="Minimum variance (convex)",
+    description="The lowest-variance mix, solved as a convex program: a certified global "
+                "optimum, with a shadow price for every constraint that binds.",
+    solve=lambda ctx: _record(ctx, convex.minimum_variance(ctx.risk_model(), ctx.mandate())),
+))
+
+register(Strategy(
+    name="risk_parity_convex",
+    numerical_tolerance=1e-8,
+    label="Risk parity (convex)",
+    description="Equal risk contribution via the log-barrier formulation, which is convex and has "
+                "a unique solution, rather than minimizing the dispersion of contributions, "
+                "which is not.",
+    solve=lambda ctx: _record(ctx, convex.risk_parity(ctx.risk_model(), ctx.mandate())),
+))
+
+
+def _convex_sharpe(ctx: Context) -> np.ndarray:
+    means, _ = ctx.expected_returns()
+    return _record(ctx, convex.maximum_sharpe(ctx.risk_model(), means, ctx.risk_free_rate, ctx.mandate()))
+
+
+register(Strategy(
+    name="maximum_sharpe_convex",
+    numerical_tolerance=1e-8,
+    label="Maximum Sharpe (convex)",
+    description="The tangency portfolio by the Schaible transform, which turns the ratio into a "
+                "convex quadratic. Still depends on return forecasts, which stay the weakest input.",
+    solve=_convex_sharpe,
+    needs_expected_returns=True,
+    scale_invariant=False,
+))
+
+register(Strategy(
+    name="maximum_diversification_convex",
+    numerical_tolerance=1e-8,
+    label="Maximum diversification (convex)",
+    description="The largest ratio of weighted standalone volatility to portfolio volatility, by "
+                "the same ratio transform. Needs no return forecast.",
+    solve=lambda ctx: _record(ctx, convex.maximum_diversification(ctx.risk_model(), ctx.mandate())),
+))
+
+
+def _cost_aware(ctx: Context) -> np.ndarray:
+    """Minimum variance with spread and market impact priced into the objective.
+
+    Impact is modelled as a power of the traded weight, which is convex above an
+    exponent of one, so the cost of reaching a portfolio is weighed against the
+    risk it saves inside a single problem rather than penalised afterwards.
+    """
+    mandate = ctx.mandate(
+        spread_bps=float(ctx.parameters.get("spread_bps", ctx.transaction_cost_bps)),
+        impact_coefficient=float(ctx.parameters.get("impact_coefficient", 0.5)),
+        turnover_budget=ctx.parameters.get("turnover_budget"),
+    )
+    return _record(ctx, convex.minimum_variance(ctx.risk_model(), mandate))
+
+
+register(Strategy(
+    name="minimum_variance_after_costs",
+    numerical_tolerance=1e-8,
+    label="Minimum variance, after costs",
+    description="Minimum variance with spread and a convex market-impact term in the objective, so "
+                "the portfolio only moves when the variance saved is worth what the trade costs.",
+    solve=_cost_aware,
+    needs_parameters=("spread_bps", "impact_coefficient"),
+    scale_invariant=False,
+))
+
+
+def _benchmark_relative(ctx: Context) -> np.ndarray:
+    """Most mandates are relative: the risk that matters is differing from the index."""
+    if ctx.benchmark is None:
+        raise ValueError(
+            "Benchmark-relative construction needs benchmark weights. Supply them as the "
+            "'benchmark' context field, or choose an absolute-risk methodology.")
+    limit = float(ctx.parameters.get("tracking_error_limit", 0.03))
+    means, _ = ctx.expected_returns()
+    model = ctx.risk_model()
+    mandate = ctx.mandate(tracking_error_limit=limit)
+    import cvxpy as cp
+
+    assets = model.assets
+    mandate.validate(assets)
+    weights = cp.Variable(assets)
+    constraints, named = convex._mandate_constraints(weights, mandate, model, assets)
+    active = weights - np.asarray(ctx.benchmark, dtype=float)
+    problem = cp.Problem(cp.Maximize(means @ active - convex._cost_expression(weights, mandate)),
+                         constraints)
+    solution = convex._solve(problem, weights, mandate, named, "active return at a risk budget", assets)
+    solution.diagnostics["tracking_error"] = model.volatility(solution.weights - ctx.benchmark)
+    return _record(ctx, solution)
+
+
+register(Strategy(
+    name="active_return_at_risk_budget",
+    numerical_tolerance=1e-8,
+    label="Active return at a tracking-error budget",
+    description="Maximizes expected return relative to the benchmark, subject to a ceiling on "
+                "tracking error. The shape of most institutional mandates.",
+    solve=_benchmark_relative,
+    needs_expected_returns=True,
+    needs_parameters=("tracking_error_limit",),
     scale_invariant=False,
 ))
 

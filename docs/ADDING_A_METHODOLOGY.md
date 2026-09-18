@@ -38,7 +38,9 @@ holds that promise in place.
 | --- | --- |
 | `returns` | the trailing estimation window, most recent row last |
 | `constraints` | the mandate: long-only, fully invested, cap per holding |
-| `covariance()` | the risk model, so every methodology uses the same one |
+| `risk_model(kind)` | sample, Ledoit-Wolf or statistical factor, built once and shared |
+| `mandate()` | position bounds, group limits and a turnover budget, assembled from the request |
+| `covariance()` | the risk model as a plain matrix, for methodologies that want one |
 | `expected_returns()` | shrunk means, for the rules that need them |
 | `previous_weights` | the portfolio being moved from, for cost-aware rules |
 | `risk_free_rate`, `transaction_cost_bps` | the economics |
@@ -49,6 +51,30 @@ the benchmark, or to the rest of the backtest. A methodology that needs one of
 those is asking for something the live system would not have at that moment, and
 that is the conversation to have before the code is written rather than after
 the backtest looks good.
+
+### The mandate is not yours to set
+
+`mandate()` gives you the limits the desk already runs under: position bounds,
+sector and country limits, a turnover budget. They apply to whatever you build.
+
+What it deliberately does **not** give you is a tracking-error ceiling or a cost
+term, because those change what is being optimized rather than constraining it.
+A methodology that wants them asks explicitly, with `ctx.mandate(tracking_error_limit=...)`.
+This distinction came out of a real defect: parameters intended for one
+methodology were being read by every other, so "minimum variance" was quietly
+solving a benchmark-relative problem. `test_the_mandate_does_not_inherit_objectives_from_the_parameter_bag`
+holds the line.
+
+### Convex where it can be
+
+New objectives should be written as convex programs and handed to the solver in
+`app/convex.py` rather than to a local search. You get a certified optimum, duals
+that price each constraint, and a real infeasibility answer. See
+[`OPTIMIZATION.md`](OPTIMIZATION.md); the risk-parity rewrite there is the
+argument in one example.
+
+If your objective genuinely is not convex, say so in the strategy's description
+and expect the conformance harness to be strict about determinism.
 
 ## The gate
 
@@ -72,6 +98,7 @@ in CI beside the unit tests.
 | survives degenerate data | perfectly correlated holdings, a halted name with zero variance, one extreme print, a short window |
 | weight stability | advisory: how far the answer moves when the window is resampled |
 | runs within budget | a solve that is fine once and hopeless inside a walk-forward loop |
+| numerical tolerance | declared per strategy: a local search reproduces to machine precision, an interior-point solver to its convergence tolerance, and the difference is a property of the method rather than something to wave through |
 | scales to 60 assets | a method that only works on the eight names it was written for |
 
 Two of these earn their keep immediately. The asset-order check fails any rule

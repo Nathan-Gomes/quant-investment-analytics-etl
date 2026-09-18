@@ -6,3 +6,4 @@ app/cache
 output
 notebooks
 dist
+docs/assets

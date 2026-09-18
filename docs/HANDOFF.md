@@ -1,4 +1,4 @@
-# Handoff brief: deploying Portfolio Lab
+# Handoff brief: deploying Strata
 
 Paste this whole file to whoever picks the work up. It describes what exists,
 what must not change, and the three ways this can reach a public site.
@@ -26,7 +26,7 @@ that. So the choice is about where the Python runs.
 ## Three options
 
 **A. Frozen demo on the existing static site.** Copy
-`dist/portfolio-lab-demo.html` (built with `python tools/build_demo.py`) next to
+`dist/strata-demo.html` (built with `python tools/build_demo.py`) next to
 the other project pages. One file, no infrastructure, no running costs, works
 offline. It carries nine Canadian securities and cannot accept any other ticker.
 Good as a case-study exhibit next to the existing report.
@@ -41,7 +41,7 @@ get live tickers in front of someone.
 into the site and point it at the API:
 
 ```html
-<script>window.PORTFOLIO_LAB_API = "https://portfolio-lab-api.example.com/";</script>
+<script>window.STRATA_API = "https://portfolio-lab-api.example.com/";</script>
 <script src="charts.js"></script>
 <script src="backend.js"></script>
 <script src="app.js"></script>
@@ -50,11 +50,11 @@ into the site and point it at the API:
 Then start the API with the site's origin allowed:
 
 ```sh
-PORTFOLIO_LAB_ALLOWED_ORIGINS="https://www.nathan-gomes.com" uvicorn app.server:api
+STRATA_ALLOWED_ORIGINS="https://www.nathan-gomes.com" uvicorn app.server:api
 ```
 
 Both pieces are already built for this; `backend.js` reads
-`window.PORTFOLIO_LAB_API` and the server adds CORS only when that environment
+`window.STRATA_API` and the server adds CORS only when that environment
 variable is set. Use this only if the interface has to live inside the existing
 site's navigation. Otherwise B is less to go wrong.
 
@@ -73,9 +73,9 @@ On a platform, point it at the `Dockerfile` and set:
 
 | Variable | Value | Why |
 | --- | --- | --- |
-| `PORTFOLIO_LAB_SOURCE` | `auto` | Yahoo Finance. Use `bundled` to force the frozen dataset. |
+| `STRATA_SOURCE` | `auto` | Yahoo Finance. Use `bundled` to force the frozen dataset. |
 | `PORT` | platform-provided | The image already reads it. |
-| `PORTFOLIO_LAB_ALLOWED_ORIGINS` | unset | Only needed for option C. |
+| `STRATA_ALLOWED_ORIGINS` | unset | Only needed for option C. |
 
 Mount a persistent volume at `/srv/app/cache` if the platform offers one. That
 directory holds each ticker's downloaded history plus a provenance record. It is
@@ -160,7 +160,7 @@ app/rng.py           seeded generator shared with the browser
 app/static/          interface: index.html, styles.css, charts.js, app.js,
                      backend.js (server mode), engine.js + backend-local.js
                      (browser mode, used only by the standalone demo)
-tools/build_demo.py  builds dist/portfolio-lab-demo.html
+tools/build_demo.py  builds dist/strata-demo.html
 tests/               92 tests: parity with the research pipeline, solver
                      correctness against closed forms, no-look-ahead checks, and
                      deliberately broken methodologies the harness must reject

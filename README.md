@@ -1,15 +1,19 @@
-# Quantitative Investment Analytics
+<p align="center">
+  <img src="docs/assets/strata-header.png" alt="Strata — quantitative investment analytics" width="100%">
+</p>
+
+# Strata
 
 **A reproducible research pipeline and portfolio construction bench: compare allocations, test risk, and translate quantitative methods into auditable software.**
 
-[Launch the live app](https://nathan-portfolio-lab.onrender.com/) · [Open the offline demo](https://www.nathan-gomes.com/portfolio-lab-demo.html) · [Read the case study](https://www.nathan-gomes.com/Project-Investment-Analytics.dc.html)
+[Launch Strata](https://nathan-portfolio-lab.onrender.com/) · [Open the offline demo](https://www.nathan-gomes.com/strata-demo.html) · [Read the case study](https://www.nathan-gomes.com/Project-Investment-Analytics.dc.html)
 
 The live app supports Yahoo Finance tickers and Python optimization. The offline demo uses nine frozen securities and does not include the Python solvers. Neither places trades.
 
 [![Tests](https://github.com/Nathan-Gomes/quant-investment-analytics-etl/actions/workflows/test.yml/badge.svg)](https://github.com/Nathan-Gomes/quant-investment-analytics-etl/actions/workflows/test.yml)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
-![Tests](https://img.shields.io/badge/tests-99%20passing-brightgreen)
-![Conformance](https://img.shields.io/badge/methodologies-6%2F6%20conform-brightgreen)
+![Tests](https://img.shields.io/badge/tests-134%20passing-brightgreen)
+![Conformance](https://img.shields.io/badge/methodologies-12%2F12%20conform-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
 ![Realized value, then the scenario fan](docs/assets/timeline.png)
@@ -28,11 +32,14 @@ Three things, in one repository.
 
 **A path from research to production.** Construction rules are registered against a contract rather than hard-coded. Every one passes the same conformance battery before it ships, and every result carries a manifest that says exactly what produced it.
 
-![Portfolio Lab interface](docs/assets/app-overview.png)
-
-*The research bench in dark mode: portfolio controls, historical results and conditional scenario ranges. This reproducible example explicitly uses the frozen dataset.*
-
 ## Quick start
+
+![Strata interface](docs/assets/app-overview.png)
+
+*The research bench with portfolio controls, historical results and conditional scenarios. This reproducible example explicitly uses the frozen dataset.*
+
+Analyses report live progress and elapsed time. Concurrent downloads and a
+vectorized sampler improve responsiveness without changing the random sequence.
 
 ```sh
 python3 -m venv .venv && source .venv/bin/activate
@@ -40,11 +47,11 @@ pip install -r requirements.txt -r requirements-app.txt
 
 python -m src.pipeline --source cached   # the research pipeline -> output/report.html
 python -m app.server                     # the bench -> http://127.0.0.1:8000
-python -m pytest -q                      # 99 tests
+python -m pytest -q                      # full regression suite
 python -m app.conformance                # the methodology gate
 ```
 
-`python tools/build_demo.py` produces `dist/portfolio-lab-demo.html`: the whole bench in one file, engine included, running in the browser on the frozen dataset with no server and no network.
+`python tools/build_demo.py` produces `dist/strata-demo.html`: the whole bench in one file, engine included, running in the browser on the frozen dataset with no server and no network.
 
 ## What it found
 
@@ -71,7 +78,7 @@ Running the optimizers walk-forward over the same universe, re-solving at every 
 | **Equal weight** | 20.21% | 16.93% | **1.00** | 0.39 |
 | XIC benchmark | 16.22% | 16.37% | 0.82 | — |
 
-Walk-forward minimum variance underperforms equal weighting in this selected sample and trades more frequently. This is consistent with the estimation-error concern studied by DeMiguel, Garlappi and Uppal (2009), but is not a replication of their study or proof of the cause of this result. The bench makes those tradeoffs visible instead of assuming optimization must improve performance.
+Walk-forward minimum variance underperforms equal weighting in this selected sample and trades more frequently. This is consistent with the estimation-error concern studied by DeMiguel, Garlappi and Uppal (2009), but is not a replication of their study or proof of the cause of this result.
 
 ---
 
@@ -79,13 +86,13 @@ Walk-forward minimum variance underperforms equal weighting in this selected sam
 
 ![Walk-forward optimization and conformance checks](docs/assets/optimization-plate.png)
 
-*Trailing-window construction, risk contributions and the expanded methodology checks, captured from a completed run of the Python app.*
+*Trailing-window construction, risk contributions and methodology checks from a completed Python app run.*
 
 ### Risk and return, promised and delivered
 
 ![Efficient frontier with realized outcomes](docs/assets/efficient-frontier.png)
 
-The dashed curve is the efficient frontier fitted to the *whole* window, so it uses hindsight. The filled dots show realized walk-forward results. Their separation illustrates the difference between in-sample estimates and realized outcomes; it does not isolate estimation error from costs, constraints or changing allocations.
+The dashed curve is the efficient frontier fitted to the *whole* window, so it uses hindsight. The filled dots show realized walk-forward results. Their separation does not isolate estimation error from costs, constraints or changing allocations.
 
 ### How much an optimizer moves
 
@@ -119,6 +126,26 @@ Five thousand paths of 20-session blocks resampled from each portfolio's own com
 Full detail in [`docs/README_pipeline_detail.md`](docs/README_pipeline_detail.md).
 
 ### Portfolio construction
+
+Objectives are written as **convex programs** and solved by a conic solver, which
+returns a certified global optimum, a shadow price for every binding constraint,
+and a definite "infeasible" — with the arithmetic that shows why — when a mandate
+cannot be met. Risk parity is the clearest case: written as "minimize the
+dispersion of risk contributions" it is not convex, and a local search on it left
+a 3.4 percentage point spread across contributions at 40 assets; written as
+`min ½wᵀΣw − Σ bᵢ log wᵢ` it is convex, unique, and reaches 3.5e-6.
+
+Risk is estimated three ways — sample, Ledoit-Wolf shrinkage, and a **statistical
+factor model** `Σ = BBᵀ + D` whose factor count is the number of eigenvalues above
+the Marchenko-Pastur noise edge rather than a tuned parameter. The factor form is
+what makes a large universe tractable: 500 names solve in 15 ms against 177 ms
+dense, and the portfolio's variance splits into common and specific parts.
+
+Mandates carry what a real book runs under: position caps, sector and country
+limits, turnover budgets, tracking-error ceilings, and a convex market-impact
+term in the objective so the cost of reaching a portfolio is weighed against the
+risk it saves. [`docs/OPTIMIZATION.md`](docs/OPTIMIZATION.md) covers the
+formulations and what they still do not do.
 
 Covariance is estimated with **Ledoit-Wolf shrinkage** toward a scaled identity, the intensity estimated from the data and reported in the interface. With 25 assets and a year of daily data a sample covariance matrix fits 325 parameters on 252 observations, and its smallest eigenvalues — precisely the directions a variance minimizer loads into — are the worst estimated. Expected returns, where an objective needs them, are shrunk toward the cross-sectional mean; three of the four objectives need none at all.
 
@@ -205,18 +232,20 @@ flowchart LR
 | A study can be shared | The whole setup encodes into the link, so a colleague opens the identical study rather than a description of one |
 
 ```
-99 tests · 6/6 methodologies conform · report, notebook and demo rebuilt on every push
+134 tests · 12/12 methodologies conform · report, notebook and demo rebuilt on every push
 ```
 
 ## Project structure
 
 ```text
-app/         The bench: engine, optimizer, strategy registry, conformance
-             harness, provenance, market data, FastAPI service, interface
+app/         The bench: engine, convex optimizer, risk models, strategy
+             registry, conformance harness, provenance, market data,
+             FastAPI service, interface
 src/         The pipeline: extract, validation, analytics, scenarios, report, SQL load
 data/        Frozen prices, holdings, security master
 sql/         Views using joins, CTEs, aggregations and window functions
-tests/       99 tests: parity, solver correctness, no-look-ahead, conformance
+tests/       Regression tests: parity, solver correctness against closed forms,
+             no-look-ahead, mandate compliance, scale, conformance
 tools/       Single-file demo build, cross-language test harness
 docs/        Review guide, app guide, methodology guide, handoff brief
 notebooks/   Executed research notebook
@@ -231,6 +260,7 @@ Stated here because they are the first thing a reviewer should ask about.
 - **No FX.** Mixing currencies measures each in its own; the app warns rather than converting.
 - **Not modelled:** taxes, inflation, cash dividends, delistings, market impact beyond a fixed spread, spreads that widen in stress.
 - **A constant risk-free rate** across a decade is an assumption, and Sharpe is sensitive to it.
+- **The risk model is statistical, not fundamental.** Its factors have no economic names, so there is no value or momentum exposure to report.
 - **Estimation error dominates.** With a handful of assets and a few years of daily data, the differences between candidate portfolios are frequently smaller than the error in the inputs that produced them.
 
 This is research tooling for studying historical data under stated assumptions. It is not investment advice, and no output is a recommendation to buy or sell anything. Market data access remains subject to the provider's terms.
@@ -248,10 +278,11 @@ This is research tooling for studying historical data under stated assumptions. 
 | --- | --- |
 | [`docs/REVIEW_GUIDE.md`](docs/REVIEW_GUIDE.md) | Reading the research in fifteen minutes |
 | [`docs/APP_GUIDE.md`](docs/APP_GUIDE.md) | Running the bench, the API, and its limits |
+| [`docs/OPTIMIZATION.md`](docs/OPTIMIZATION.md) | Convex formulations, risk models, mandates, and the gaps |
 | [`docs/ADDING_A_METHODOLOGY.md`](docs/ADDING_A_METHODOLOGY.md) | The contract, the gate, and a worked example |
 | [`docs/HANDOFF.md`](docs/HANDOFF.md) | Deploying it |
 | [`docs/README_pipeline_detail.md`](docs/README_pipeline_detail.md) | Portfolio definitions, conventions, SQL mart, validation rules |
 
 ## Presentation reference
 
-The screenshot-led project walkthrough was informed by [Genesis Synapse Showcase](https://github.com/ColinLefter/Genesis-Synapse-Showcase). All screenshots here show Portfolio Lab; no Genesis code or product assets are included.
+The screenshot-led walkthrough was informed by [Genesis Synapse Showcase](https://github.com/ColinLefter/Genesis-Synapse-Showcase). All screenshots show Strata; no Genesis code or product assets are included.

@@ -373,6 +373,11 @@ def test_one_bad_symbol_does_not_sink_the_whole_request(fake_yahoo):
         marketdata.load(["AAPL", "NOSUCH"], "2015-01-01", "2026-01-01", source="yahoo")
 
 
+def test_auto_source_rejects_partial_downloads(fake_yahoo):
+    with pytest.raises(ValueError, match="NOSUCH"):
+        marketdata.load(["AAPL", "NOSUCH"], "2015-01-01", "2026-01-01", source="auto")
+
+
 # --------------------------------------------------------------------------- #
 # Provenance
 # --------------------------------------------------------------------------- #
@@ -436,3 +441,71 @@ def test_the_manifest_records_the_code_and_environment_that_ran(published_run):
     assert "engine.py" in record["code_files"] and "optimize.py" in record["code_files"]
     assert record["environment"]["packages"]["numpy"]
     assert record["data"]["tickers"] and record["data"]["rows"] > 1000
+
+
+# --------------------------------------------------------------------------- #
+# The service, including the progress stream
+# --------------------------------------------------------------------------- #
+
+@pytest.fixture(scope="module")
+def client():
+    from fastapi.testclient import TestClient
+
+    from app.server import api
+
+    return TestClient(api)
+
+
+BAKE_OFF = {
+    "portfolios": [
+        {"name": "Min var", "weights": {t: 1 for t in ["RY.TO", "TD.TO", "ENB.TO", "FTS.TO"]},
+         "scheme": "optimized", "objective": "minimum_variance", "max_weight": 0.5},
+        {"name": "Equal", "weights": {t: 1 for t in ["RY.TO", "TD.TO", "ENB.TO", "FTS.TO"]},
+         "scheme": "equal"},
+    ],
+    "benchmark": "XIC.TO", "source": "bundled", "paths": 400,
+    "start": "2019-01-01", "end": "2026-08-31",
+}
+
+
+def stream_events(client, body) -> list[dict]:
+    with client.stream("POST", "/api/analyze/stream", json=body) as response:
+        assert response.status_code == 200
+        return [json.loads(line) for line in response.iter_lines() if line.strip()]
+
+
+def test_the_stream_reports_each_stage_before_the_result(client):
+    """The point of the endpoint: movement long before the answer arrives."""
+    events = stream_events(client, BAKE_OFF)
+    phases = [event["phase"] for event in events]
+    assert phases[0] == "accepted"
+    assert phases[-1] == "done"
+    for expected in ("prices", "align", "backtest", "scenarios", "diagnostics"):
+        assert expected in phases, f"no {expected} event in {phases}"
+    # Progress within a phase, so a bar can move while one portfolio is running.
+    steps = [e for e in events if e.get("steps")]
+    assert steps and all(1 <= e["step"] <= e["steps"] for e in steps)
+
+
+def test_the_streamed_result_matches_the_plain_endpoint(client):
+    """Two ways in, one answer: the stream is a delivery detail, not a variant."""
+    streamed = next(e["payload"] for e in stream_events(client, BAKE_OFF) if e["phase"] == "done")
+    plain = client.post("/api/analyze", json=BAKE_OFF).json()
+    assert streamed["meta"]["run_id"] == plain["meta"]["run_id"]
+    for left, right in zip(streamed["portfolios"], plain["portfolios"]):
+        assert left["summary"]["sharpe"] == pytest.approx(right["summary"]["sharpe"])
+        assert left["scenario"]["summary"] == right["scenario"]["summary"]
+
+
+def test_a_rejected_request_is_reported_on_the_stream_not_dropped(client):
+    body = {**BAKE_OFF, "portfolios": [{"name": "X", "weights": {"NOSUCH.TO": 1}}]}
+    events = stream_events(client, body)
+    assert events[-1]["phase"] == "error"
+    assert "NOSUCH.TO" in events[-1]["message"]
+
+
+def test_the_payload_reports_where_the_time_went(client):
+    payload = client.post("/api/analyze", json=BAKE_OFF).json()
+    timings = payload["meta"]["timings_ms"]
+    assert {"align", "backtest", "scenarios", "diagnostics", "total"} <= set(timings)
+    assert timings["total"] >= sum(v for k, v in timings.items() if k != "total") - 1

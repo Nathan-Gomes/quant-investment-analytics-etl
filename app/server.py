@@ -1,23 +1,27 @@
-"""The web service: one analysis endpoint, plus the static interface.
+"""Strata's web service: the analysis endpoints, plus the static interface.
 
 Run it with::
 
     uvicorn app.server:api --reload
 
 Then open http://127.0.0.1:8000. With no network access, set
-``PORTFOLIO_LAB_SOURCE=bundled`` to work from the frozen dataset.
+``STRATA_SOURCE=bundled`` to work from the frozen dataset.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+import queue
+import threading
+import time
 from datetime import date, timedelta
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -27,13 +31,19 @@ from .engine import SCHEDULES, SCHEMES, Portfolio, Settings
 from .optimize import OBJECTIVES
 
 STATIC = Path(__file__).resolve().parent / "static"
-DEFAULT_SOURCE = os.environ.get("PORTFOLIO_LAB_SOURCE", "auto")
+# STRATA_* is the current spelling; the older PORTFOLIO_LAB_* names still work so
+# that a deployment configured before the rename keeps running untouched.
+def _setting(name: str, default: str) -> str:
+    return os.environ.get(f"STRATA_{name}", os.environ.get(f"PORTFOLIO_LAB_{name}", default))
+
+
+DEFAULT_SOURCE = _setting("SOURCE", "auto")
 # Set when the interface is served from another origin, such as a static site
 # calling this API: PORTFOLIO_LAB_ALLOWED_ORIGINS="https://example.com"
-ALLOWED_ORIGINS = [o.strip() for o in os.environ.get("PORTFOLIO_LAB_ALLOWED_ORIGINS", "").split(",") if o.strip()]
-logger = logging.getLogger("portfolio_lab")
+ALLOWED_ORIGINS = [o.strip() for o in _setting("ALLOWED_ORIGINS", "").split(",") if o.strip()]
+logger = logging.getLogger("strata")
 
-api = FastAPI(title="Portfolio Lab", version=ENGINE_VERSION,
+api = FastAPI(title="Strata", version=ENGINE_VERSION,
               description="Backtest and scenario analysis for user-defined portfolios.")
 
 
@@ -125,65 +135,118 @@ def universe() -> dict:
     return {"bundled": frame.to_dict(orient="records")}
 
 
-@api.post("/api/analyze")
-def run_analysis(request: AnalysisRequest) -> JSONResponse:
+def _prepare(request: AnalysisRequest):
+    """Validate the request and resolve it to prices, settings and portfolios."""
     tickers: list[str] = []
     for portfolio in request.portfolios:
         if portfolio.scheme not in SCHEMES:
-            raise HTTPException(400, f"Unknown weighting scheme '{portfolio.scheme}'.")
+            raise ValueError(f"Unknown weighting scheme '{portfolio.scheme}'.")
         if portfolio.scheme == "optimized" and portfolio.objective not in strategies.REGISTRY:
-            raise HTTPException(
-                400, f"Unknown methodology '{portfolio.objective}'. "
-                     f"Registered: {', '.join(sorted(strategies.REGISTRY))}.")
-        # A zero weight is not a holding, so its ticker never enters the universe
-        # and cannot fail a run over a symbol that carries nothing.
+            raise ValueError(
+                f"Unknown methodology '{portfolio.objective}'. "
+                f"Registered: {', '.join(sorted(strategies.REGISTRY))}.")
         portfolio.weights = {
             t.strip().upper(): w for t, w in portfolio.weights.items()
             if t.strip() and (portfolio.scheme != "custom" or w > 0)
         }
         if not portfolio.weights:
-            raise HTTPException(400, f"{portfolio.name} needs at least one holding with a weight above zero.")
+            raise ValueError(f"{portfolio.name} needs at least one holding with a weight above zero.")
         tickers.extend(portfolio.weights)
     if request.benchmark:
         tickers.append(request.benchmark.strip().upper())
     tickers = list(dict.fromkeys(t for t in tickers if t))
     if not tickers:
-        raise HTTPException(400, "Add at least one holding.")
+        raise ValueError("Add at least one holding.")
 
     end = request.end or date.today().isoformat()
     start = request.start or (date.fromisoformat(end) - timedelta(days=365 * 10 + 3)).isoformat()
     if start >= end:
-        raise HTTPException(400, "The start date must come before the end date.")
+        raise ValueError("The start date must come before the end date.")
 
+    settings = Settings(
+        initial_capital=request.initial_capital,
+        transaction_cost_bps=request.transaction_cost_bps,
+        risk_free_rate=request.risk_free_rate,
+        rebalance=request.rebalance,
+        benchmark=request.benchmark.strip().upper() if request.benchmark else None,
+        horizon_years=request.horizon_years,
+        paths=request.paths,
+        block_days=request.block_days,
+        seed=request.seed,
+        scenario_basis=request.scenario_basis,
+    )
+    portfolios = [
+        Portfolio(name=p.name, weights=dict(p.weights), scheme=p.scheme,
+                  objective=p.objective, estimation_days=p.estimation_days,
+                  max_weight=p.max_weight, estimator=p.estimator,
+                  volatility_target=p.volatility_target, parameters=dict(p.parameters))
+        for p in request.portfolios
+    ]
+    return tickers, start, end, settings, portfolios
+
+
+def _analyze(request: AnalysisRequest, progress=None) -> dict:
+    tickers, start, end, settings, portfolios = _prepare(request)
     source = request.source or DEFAULT_SOURCE
+    if progress:
+        progress({"phase": "prices", "detail": f"{len(tickers)} securities from "
+                  + ("the bundled dataset" if source == "bundled" else "Yahoo Finance")})
+    priceset = marketdata.load(tickers, start, end, source)
+    return analyze(
+        priceset.prices, portfolios, settings,
+        metadata=priceset.metadata, start=start, end=end,
+        source_note=priceset.note, request=request.model_dump(exclude_none=False),
+        progress=progress,
+    )
+
+
+@api.post("/api/analyze/stream")
+def run_analysis_stream(request: AnalysisRequest) -> StreamingResponse:
+    """The same analysis, reporting each stage as it finishes.
+
+    A request that takes twenty seconds and says nothing is indistinguishable
+    from one that has hung. The work runs on a worker thread and pushes progress
+    onto a queue that this generator drains, so the client sees the stage it is
+    in rather than a spinner.
+
+    Newline-delimited JSON rather than server-sent events, because the request
+    is a POST and EventSource cannot make one.
+    """
+    events: queue.Queue = queue.Queue()
+
+    def worker() -> None:
+        started = time.perf_counter()
+        try:
+            payload = _analyze(request, progress=events.put)
+            logger.info("run %s finished in %.0f ms: %s", payload["meta"].get("run_id"),
+                        (time.perf_counter() - started) * 1000, payload["meta"]["timings_ms"])
+            events.put({"phase": "done", "payload": payload})
+        except ValueError as error:
+            events.put({"phase": "error", "message": str(error)})
+        except Exception as error:  # noqa: BLE001
+            logger.exception("Analysis failed")
+            events.put({"phase": "error", "message": f"The analysis did not finish: {error}"})
+        finally:
+            events.put(None)
+
+    threading.Thread(target=worker, name="analysis", daemon=True).start()
+
+    def stream():
+        yield json.dumps({"phase": "accepted"}) + "\n"
+        while True:
+            event = events.get()
+            if event is None:
+                break
+            yield json.dumps(event, default=str) + "\n"
+
+    return StreamingResponse(stream(), media_type="application/x-ndjson",
+                             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+
+
+@api.post("/api/analyze")
+def run_analysis(request: AnalysisRequest) -> JSONResponse:
     try:
-        priceset = marketdata.load(tickers, start, end, source)
-        settings = Settings(
-            initial_capital=request.initial_capital,
-            transaction_cost_bps=request.transaction_cost_bps,
-            risk_free_rate=request.risk_free_rate,
-            rebalance=request.rebalance,
-            benchmark=request.benchmark.strip().upper() if request.benchmark else None,
-            horizon_years=request.horizon_years,
-            paths=request.paths,
-            block_days=request.block_days,
-            seed=request.seed,
-            scenario_basis=request.scenario_basis,
-        )
-        payload = analyze(
-            priceset.prices,
-            [Portfolio(name=p.name, weights=dict(p.weights), scheme=p.scheme,
-                       objective=p.objective, estimation_days=p.estimation_days,
-                       max_weight=p.max_weight, estimator=p.estimator,
-                       volatility_target=p.volatility_target, parameters=dict(p.parameters))
-             for p in request.portfolios],
-            settings,
-            metadata=priceset.metadata,
-            start=start,
-            end=end,
-            source_note=priceset.note,
-            request=request.model_dump(exclude_none=False),
-        )
+        payload = _analyze(request)
     except ValueError as error:
         raise HTTPException(400, str(error)) from error
     except Exception as error:  # noqa: BLE001

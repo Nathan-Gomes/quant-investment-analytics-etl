@@ -88,8 +88,17 @@ def sample_returns(seed: int = 17, observations: int = 320, assets: int = 6) -> 
 
 
 def _context(returns: np.ndarray, constraints: Constraints, **kwargs) -> Context:
-    parameters = {"volatility_target": 0.12, "turnover_lambda": 1.0}
+    """The context every methodology is judged in.
+
+    Benchmark weights are supplied because a relative mandate cannot be tested
+    without them. They are equal weight, which is scaffolding for the harness and
+    not a claim about any real index.
+    """
+    parameters = {"volatility_target": 0.12, "turnover_lambda": 1.0,
+                  "tracking_error_limit": 0.05, "spread_bps": 10.0, "impact_coefficient": 0.5}
     parameters.update(kwargs.pop("parameters", {}))
+    assets = returns.shape[1]
+    kwargs.setdefault("benchmark", np.full(assets, 1 / assets))
     return Context(returns=returns, constraints=constraints, parameters=parameters, **kwargs)
 
 
@@ -143,14 +152,15 @@ def evaluate(strategy: Strategy, returns: np.ndarray | None = None) -> Report:
     order = np.random.default_rng(0).permutation(assets)
     permuted = strategy(_context(returns[:, order], constraints))
     gap = float(np.abs(permuted - weights[order]).max())
-    report.add("independent of asset order", gap < 1e-6,
-               f"largest difference after permuting the universe: {gap:.2e}", measurement=gap)
+    report.add("independent of asset order", gap < strategy.numerical_tolerance,
+               f"largest difference after permuting the universe: {gap:.2e} "
+               f"(tolerance {strategy.numerical_tolerance:.0e})", measurement=gap)
 
     # 5. A risk-based rule should not care what units the returns are quoted in.
     if strategy.scale_invariant:
         scaled = strategy(_context(returns * 2.0, constraints))
         shift = float(np.abs(scaled - weights).max())
-        report.add("scale invariant", shift < 1e-5,
+        report.add("scale invariant", shift < max(1e-5, strategy.numerical_tolerance),
                    f"doubling every return moved weights by {shift:.2e}", measurement=shift)
 
     # 6. Degenerate inputs are the ones that arrive on a bad data day.

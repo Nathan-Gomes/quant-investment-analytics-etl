@@ -1,9 +1,24 @@
+# Render deployment for the Strata API and interface.
 services:
   - type: web
-    name: nathan-portfolio-lab
+    name: nathan-portfolio-lab   # renaming the service would change its URL, so it stays
     runtime: docker
     plan: free
     healthCheckPath: /api/health
     envVars:
-      - key: PORTFOLIO_LAB_SOURCE
+      - key: STRATA_SOURCE
         value: auto
+      # A free instance loses its disk on every restart, so a cold cache means
+      # re-downloading every ticker. This TTL helps only while files survive;
+      # it does not make the free instance's filesystem persistent.
+      - key: STRATA_CACHE_HOURS
+        value: "72"
+      - key: STRATA_DOWNLOAD_WORKERS
+        value: "8"
+    # A persistent disk retains cache files across restarts. New or expired
+    # requests still need downloads. Free instances
+    # cannot mount one; on a paid plan, uncomment this.
+    # disk:
+    #   name: price-cache
+    #   mountPath: /srv/app/cache
+    #   sizeGB: 1

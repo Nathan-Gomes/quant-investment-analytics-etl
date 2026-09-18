@@ -98,8 +98,10 @@ class Portfolio:
                 )
             if not 60 <= self.estimation_days <= 2520:
                 raise ValueError(f"{self.name}: the estimation window must be between 60 and 2,520 sessions.")
-            if self.estimator not in ("ledoit_wolf", "sample"):
-                raise ValueError(f"{self.name}: covariance estimator must be 'ledoit_wolf' or 'sample'.")
+            from .riskmodel import MODELS
+            if self.estimator not in MODELS:
+                raise ValueError(
+                    f"{self.name}: risk model must be one of {', '.join(MODELS)}.")
 
     def resolve(self, columns: Sequence[str], calibration_returns: pd.DataFrame) -> pd.Series:
         if self.scheme == "equal":

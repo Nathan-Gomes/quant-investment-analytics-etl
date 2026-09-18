@@ -169,7 +169,18 @@ function timeline(node, spec) {
           d: path(pts(s.bands.median)), stroke: s.color, "stroke-dasharray": chosen ? null : "4 3",
         }, node);
       });
+      // The seam is the one mark that carries the project's spectrum: it divides
+      // what happened from what is simulated, so it earns the emphasis.
+      const defs = el("defs", {}, node);
+      const sheen = el("linearGradient", { id: "seam-sheen", x1: "0", y1: "0", x2: "0", y2: "1" }, defs);
+      el("stop", { offset: "0%", "stop-color": "var(--s1)" }, sheen);
+      el("stop", { offset: "55%", "stop-color": "var(--s2)" }, sheen);
+      el("stop", { offset: "100%", "stop-color": "var(--s5)" }, sheen);
+      // Base line first, so the seam is still visible anywhere the gradient
+      // reference does not resolve; the spectrum is an enhancement, not the mark.
       el("line", { class: "seam", x1: seam, x2: seam, y1: pad.top, y2: pad.top + plotH }, node);
+      el("line", { class: "seam", x1: seam, x2: seam, y1: pad.top, y2: pad.top + plotH,
+        stroke: "url(#seam-sheen)", "stroke-opacity": 0.95, "stroke-width": 1.6 }, node);
       el("text", { class: "seam-label", x: seam + 5, y: pad.top + 10 }, node).textContent =
         spec.seamLabel || "scenarios start";
     }

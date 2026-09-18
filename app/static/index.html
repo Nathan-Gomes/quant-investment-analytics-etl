@@ -3,17 +3,18 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Portfolio Lab — backtest and scenario bench</title>
+<title>Strata — quantitative investment analytics</title>
 <meta name="description" content="Build a portfolio from any set of tickers, see what it did over the last 5 to 10 years, and see the range of five to ten year scenarios drawn from its own return history.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Sora:wght@200;300;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 <header class="masthead">
-  <h1>Portfolio Lab</h1>
-  <span class="lede">Historical backtest and block-bootstrap scenarios, on the engine from the Quantitative Investment Analytics pipeline.</span>
+  <h1 class="wordmark">Strata</h1>
+  <span class="wordmark-sub">Quantitative Investment Analytics</span>
+  <span class="lede">Historical backtest, block-bootstrap scenarios and walk-forward portfolio construction.</span>
   <div class="tools">
     <span class="mode" id="mode" title="Where prices come from"></span>
     <button class="chip" id="theme-toggle" type="button" title="Switch between light and dark">Dark</button>
@@ -24,117 +25,147 @@
 
 <div class="shell">
   <form class="rail" id="rail" autocomplete="off">
-    <section>
-      <h3>Portfolios <span class="faint" id="portfolio-count"></span></h3>
-      <div class="tabs" id="portfolio-tabs"></div>
-      <div class="field wide">
-        <input type="text" id="portfolio-name" maxlength="40" aria-label="Portfolio name">
+    <section class="card" data-open="true" id="card-portfolios">
+      <header><svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v18h18"/><rect x="7" y="11" width="3" height="6"/><rect x="13" y="7" width="3" height="10"/></svg><h3>Portfolios</h3><span class="aside" id="portfolio-count"></span><svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg></header>
+      <div class="card-body">
+        <div class="tabs" id="portfolio-tabs"></div>
       </div>
-      <div class="field">
-        <label for="scheme">Weighting</label>
-        <select id="scheme">
-          <optgroup label="Fixed rules">
-            <option value="custom">As entered</option>
-            <option value="equal">Equal weight</option>
-            <option value="inverse_volatility">Inverse volatility</option>
-          </optgroup>
-          <optgroup label="Re-optimized at each rebalance">
-            <option value="minimum_variance">Minimum variance</option>
-            <option value="risk_parity">Risk parity</option>
-            <option value="maximum_diversification">Maximum diversification</option>
-            <option value="maximum_sharpe">Maximum Sharpe</option>
-          </optgroup>
-        </select>
-      </div>
-      <div id="optimizer-settings" hidden>
-        <div class="field"><label for="estimation">Estimation window</label>
-          <select id="estimation">
-            <option value="126">6 months</option>
-            <option value="252">1 year</option>
-            <option value="504">2 years</option>
-            <option value="756">3 years</option>
-          </select>
+    </section>
+
+    <section class="card" data-open="true" id="card-strategy">
+      <header><svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M8.5 6H14a4 4 0 0 1 0 8H9a4 4 0 0 0 0 8"/></svg><h3>Strategy</h3><svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg></header>
+      <div class="card-body">
+        <div class="field-grid">
+          <div class="span2">
+            <label for="portfolio-name">Portfolio name</label>
+            <input type="text" id="portfolio-name" maxlength="40">
+          </div>
+          <div class="span2">
+            <label for="scheme">Weighting method</label>
+            <select id="scheme">
+              <optgroup label="Fixed rules">
+                <option value="custom">As entered</option>
+                <option value="equal">Equal weight</option>
+                <option value="inverse_volatility">Inverse volatility</option>
+              </optgroup>
+              <optgroup label="Re-optimized at each rebalance">
+                <option value="minimum_variance">Minimum variance</option>
+                <option value="risk_parity">Risk parity</option>
+                <option value="maximum_diversification">Maximum diversification</option>
+                <option value="maximum_sharpe">Maximum Sharpe</option>
+              </optgroup>
+            </select>
+          </div>
         </div>
-        <div class="field"><label for="maxweight">Cap per holding</label>
-          <select id="maxweight">
-            <option value="1">No cap</option>
-            <option value="0.5">50%</option>
-            <option value="0.35">35%</option>
-            <option value="0.25">25%</option>
-            <option value="0.15">15%</option>
-          </select>
+        <div id="optimizer-settings" hidden>
+          <div class="field-grid">
+            <div>
+              <label for="estimation">Estimation window</label>
+              <select id="estimation">
+                <option value="126">6 months</option>
+                <option value="252">1 year</option>
+                <option value="504">2 years</option>
+                <option value="756">3 years</option>
+              </select>
+            </div>
+            <div>
+              <label for="maxweight">Cap per holding</label>
+              <select id="maxweight">
+                <option value="1">No cap</option>
+                <option value="0.5">50%</option>
+                <option value="0.35">35%</option>
+                <option value="0.25">25%</option>
+                <option value="0.15">15%</option>
+              </select>
+            </div>
+            <div class="span2">
+              <label for="estimator">Risk model</label>
+              <select id="estimator">
+                <option value="ledoit_wolf">Ledoit-Wolf shrinkage</option>
+                <option value="statistical_factor">Statistical factor model</option>
+                <option value="sample">Sample covariance</option>
+              </select>
+            </div>
+          </div>
+          <p class="note" id="optimizer-note"></p>
         </div>
-        <div class="field"><label for="estimator">Covariance</label>
-          <select id="estimator">
-            <option value="ledoit_wolf">Ledoit-Wolf shrinkage</option>
-            <option value="sample">Sample</option>
-          </select>
-        </div>
-        <p class="note" id="optimizer-note"></p>
-      </div>
-      <div id="holdings"></div>
-      <div class="weightbar" id="weightbar"></div>
-      <p class="rail-error" id="universe-note"></p>
-      <div class="rowline">
-        <span class="muted" id="weight-total"></span>
-        <span class="chips">
-          <button class="chip" type="button" id="add-holding">Add holding</button>
+        <label class="group-label" for="holdings">Holdings and weights</label>
+        <div id="holdings"></div>
+        <button class="button ghost" type="button" id="add-holding"><svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Add ticker</button>
+        <div class="weightbar" id="weightbar"></div>
+        <p class="rail-error" id="universe-note"></p>
+        <div class="rowline">
+          <span class="muted" id="weight-total"></span>
           <button class="chip" type="button" id="normalize">Normalize</button>
-        </span>
-      </div>
-    </section>
-
-    <section>
-      <h3>Study window</h3>
-      <div class="field" id="source-field"><label for="source">Price data</label>
-        <select id="source">
-          <option value="auto">Yahoo Finance</option>
-          <option value="bundled">Bundled dataset</option>
-        </select>
-      </div>
-      <div class="chips" style="margin-bottom:9px">
-        <button class="chip" type="button" data-years="5">Last 5 years</button>
-        <button class="chip" type="button" data-years="10">Last 10 years</button>
-        <button class="chip" type="button" data-years="max">Longest shared</button>
-      </div>
-      <div class="field"><label for="start">Start</label><input type="date" id="start"></div>
-      <div class="field"><label for="end">End</label><input type="date" id="end"></div>
-      <div class="field"><label for="benchmark">Benchmark</label><input type="text" id="benchmark" placeholder="XIC.TO"></div>
-      <div class="field"><label for="capital">Starting amount</label><input type="number" id="capital" min="1000" step="1000"></div>
-      <div class="field"><label for="rebalance">Rebalance</label>
-        <select id="rebalance">
-          <option value="monthly">Monthly</option>
-          <option value="quarterly">Quarterly</option>
-          <option value="annual">Annually</option>
-          <option value="none">Buy and hold</option>
-        </select>
-      </div>
-      <div class="field"><label for="cost">Trading cost (bps)</label><input type="number" id="cost" min="0" max="500" step="1"></div>
-    </section>
-
-    <section>
-      <h3>Scenarios</h3>
-      <div class="field"><label for="horizon">Horizon (years)</label><input type="number" id="horizon" min="1" max="30" step="1"></div>
-      <div class="field"><label for="paths">Simulated markets</label><input type="number" id="paths" min="200" max="20000" step="100"></div>
-      <details class="advanced">
-        <summary>Sampling and assumptions</summary>
-        <div class="field"><label for="block">Block length (sessions)</label><input type="number" id="block" min="1" max="504" step="1"></div>
-        <div class="field"><label for="basis">Starting balance</label>
-          <select id="basis">
-            <option value="equal">Same for every portfolio</option>
-            <option value="continuation">Each portfolio's final value</option>
-          </select>
         </div>
-        <div class="field"><label for="rf">Risk-free rate</label><input type="number" id="rf" min="-0.5" max="1" step="0.005"></div>
-        <div class="field"><label for="seed">Seed</label><input type="number" id="seed" min="0" step="1"></div>
-      </details>
+      </div>
     </section>
 
-    <section>
-      <button class="button primary" type="submit" id="run">Run analysis</button>
-      <div class="note" id="run-status" style="margin-top:8px"></div>
-      <div class="chips" style="margin-top:12px" id="presets"></div>
+    <section class="card" data-open="true" id="card-window">
+      <header><svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg><h3>Study window</h3><svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg></header>
+      <div class="card-body">
+        <div class="chips" style="margin-bottom:10px">
+          <button class="chip" type="button" data-years="5">Last 5 years</button>
+          <button class="chip" type="button" data-years="10">Last 10 years</button>
+          <button class="chip" type="button" data-years="max">Longest shared</button>
+        </div>
+        <div class="field-grid">
+          <div><label for="start">Start date</label><input type="date" id="start"></div>
+          <div><label for="end">End date</label><input type="date" id="end"></div>
+          <div class="span2" id="source-field">
+            <label for="source">Price data</label>
+            <select id="source">
+              <option value="auto">Yahoo Finance</option>
+              <option value="bundled">Bundled dataset</option>
+            </select>
+          </div>
+        </div>
+      </div>
     </section>
+
+    <section class="card" data-open="true" id="card-settings">
+      <header><svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></svg><h3>Backtest settings</h3><svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg></header>
+      <div class="card-body">
+        <div class="field-grid">
+          <div><label for="benchmark">Benchmark</label><input type="text" id="benchmark" placeholder="XIC.TO"></div>
+          <div><label for="capital">Starting amount (CAD)</label><input type="number" id="capital" min="1000" step="1000"></div>
+          <div><label for="rebalance">Rebalance</label>
+            <select id="rebalance">
+              <option value="monthly">Monthly</option>
+              <option value="quarterly">Quarterly</option>
+              <option value="annual">Annually</option>
+              <option value="none">Buy and hold</option>
+            </select>
+          </div>
+          <div><label for="cost">Trading cost (bps)</label><input type="number" id="cost" min="0" max="500" step="1"></div>
+          <div><label for="horizon">Horizon (years)</label><input type="number" id="horizon" min="1" max="30" step="1"></div>
+          <div><label for="paths">Simulated paths</label><input type="number" id="paths" min="200" max="20000" step="100"></div>
+        </div>
+        <details class="advanced">
+          <summary>Advanced settings</summary>
+          <div class="field-grid" style="margin-top:10px">
+            <div><label for="block">Block length (sessions)</label><input type="number" id="block" min="1" max="504" step="1"></div>
+            <div><label for="seed">Seed</label><input type="number" id="seed" min="0" step="1"></div>
+            <div><label for="rf">Risk-free rate</label><input type="number" id="rf" min="-0.5" max="1" step="0.005"></div>
+            <div><label for="basis">Starting balance</label>
+              <select id="basis">
+                <option value="equal">Same for every portfolio</option>
+                <option value="continuation">Each portfolio's final value</option>
+              </select>
+            </div>
+          </div>
+        </details>
+      </div>
+    </section>
+
+    <button class="button primary" type="submit" id="run"><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4l13 8-13 8z"/></svg>Run analysis</button>
+    <div class="run-row">
+      <button class="button" type="button" id="share-setup"><svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z"/></svg>Save preset</button>
+      <button class="button" type="button" id="reset-setup"><svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>Reset</button>
+    </div>
+    <div class="note" id="run-status" style="margin-top:10px"></div>
+    <span class="presets-label">Load a preset</span>
+    <div class="chips" id="presets"></div>
   </form>
 
   <main class="results" id="results">

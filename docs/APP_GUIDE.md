@@ -1,4 +1,4 @@
-# Portfolio Lab
+# Strata
 
 An interactive front end for the research pipeline. Enter any set of tickers and
 weights, pick a window, and get the realized backtest plus the block-bootstrap
@@ -15,7 +15,10 @@ pip install -r requirements.txt -r requirements-app.txt
 python -m app.server
 ```
 
-Open <http://127.0.0.1:8000>. **Price data** at the top of the study-window
+Open <http://127.0.0.1:8000>.
+
+The older `PORTFOLIO_LAB_*` environment variables still work, so a deployment
+configured before the rename keeps running untouched. **Price data** at the top of the study-window
 controls is already set to Yahoo Finance, so type any symbol Yahoo knows —
 `AAPL`, `NVDA`, `BNS.TO`, `VTI`, `BTC-USD` — and it fetches the history on the
 first run.
@@ -33,18 +36,47 @@ With no network, switch **Price data** to the bundled dataset, or start the
 server so that is the only option:
 
 ```sh
-PORTFOLIO_LAB_SOURCE=bundled python -m app.server
+STRATA_SOURCE=bundled python -m app.server
 ```
 
 There is also a single-file build that needs no server at all:
 
 ```sh
-python tools/build_demo.py     # writes dist/portfolio-lab-demo.html
+python tools/build_demo.py     # writes dist/strata-demo.html
 ```
 
 That file carries the nine frozen securities and runs the whole engine in the
 browser. It is for showing the tool to someone without asking them to install
 Python; for any ticker outside the frozen set, run the served app.
+
+## Speed, and what the app tells you about it
+
+Every response carries `meta.timings_ms`, a breakdown by stage, and each stage is
+reported to the browser as it finishes over `POST /api/analyze/stream` —
+newline-delimited JSON, because the request is a POST and `EventSource` cannot
+make one. The interface shows the stage, a progress bar and a running clock, and
+falls back to the plain endpoint if the stream is unavailable.
+
+A representative run of the bake-off preset over nine securities, locally:
+
+| Stage | Time |
+| --- | ---: |
+| Prices and alignment | 30 ms from cache |
+| Walk-forward backtests (two optimized, two fixed) | 3.4 s |
+| Scenarios, 5,000 paths for each of four portfolios | 0.7 s |
+| Risk decomposition, frontier, weight stability | 1.4 s |
+
+Deployed on a small shared instance this is several times slower, and a free
+instance that has gone to sleep adds its cold start on top. Three things help:
+
+- **Keep the price cache.** Attach a persistent disk at `/srv/app/cache` and raise
+  `STRATA_CACHE_HOURS` (default 12). A cold cache means re-downloading
+  every ticker, which dominates everything else.
+- **Downloads already run in parallel** — `STRATA_DOWNLOAD_WORKERS`,
+  default 8. Nine tickers at a second each take about two seconds rather than
+  nine.
+- **Fewer scenario paths.** 5,000 is comfortable; 2,000 is noticeably faster and
+  moves the reported percentiles very little.
 
 ## What the interface shows
 

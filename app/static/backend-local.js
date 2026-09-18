@@ -401,9 +401,18 @@
       PL.backend.defaultEnd = PL.DATA.dates[PL.DATA.dates.length - 1];
       PL.backend.universe = Object.keys(PL.DATA.prices).sort();
     },
-    async analyze(request) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
+    async analyze(request, onProgress) {
+      // Fast enough that nobody waits, but the same phases are reported so the
+      // interface behaves identically in both builds.
+      const step = async (phase, detail) => {
+        if (onProgress) onProgress({ phase, detail });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      };
+      await step("prices", "the frozen research dataset");
+      await step("align", "checking the shared trading calendar");
+      await step("backtest", `${request.portfolios.length} portfolios`);
       const payload = analyze(request);
+      await step("scenarios", `${request.paths.toLocaleString()} paths`);
       payload.manifest = await localManifest(request, PL.DATA);
       payload.meta.run_id = payload.manifest.run_id;
       return payload;

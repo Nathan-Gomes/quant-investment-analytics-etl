@@ -3,8 +3,8 @@
   "use strict";
 
   // Serve the interface from anywhere and point it at the API with
-  // <script>window.PORTFOLIO_LAB_API = "https://your-api.example.com/";</script>
-  const base = (window.PORTFOLIO_LAB_API || "").replace(/\/?$/, "/");
+  // <script>window.STRATA_API = "https://your-api.example.com/";</script>
+  const base = (window.STRATA_API || window.PORTFOLIO_LAB_API || "").replace(/\/?$/, "/");
   const endpoint = (path) => (base ? base + path : path);
 
   const backend = {
@@ -45,12 +45,22 @@
           backend.strategies = null;
         }
       } catch (error) {
-        // A connection failure must not silently replace Yahoo with frozen prices.
+        // Connection failures must not silently replace Yahoo with frozen prices.
         backend.defaultSource = "auto";
       }
     },
 
-    async analyze(request) {
+    async analyze(request, onProgress) {
+      // The streaming endpoint reports each stage as it finishes. If anything
+      // about it fails — an old server, a proxy that buffers the body — fall
+      // back to the plain endpoint rather than leaving the person with nothing.
+      if (onProgress && globalThis.ReadableStream) {
+        try {
+          return await streamAnalysis(request, onProgress);
+        } catch (error) {
+          if (error.fromServer) throw error;
+        }
+      }
       const response = await fetch(endpoint("api/analyze"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -63,6 +73,46 @@
       return payload;
     },
   };
+
+  async function streamAnalysis(request, onProgress) {
+    const response = await fetch(endpoint("api/analyze/stream"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    });
+    if (!response.ok) {
+      const failure = new Error(`The server returned ${response.status}.`);
+      failure.fromServer = response.status >= 400 && response.status < 500
+        && response.status !== 404 && response.status !== 405;
+      throw failure;
+    }
+    if (!response.body) throw new Error("The server did not return a stream.");
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let result = null;
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop();
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const event = JSON.parse(line);
+        if (event.phase === "error") {
+          const failure = new Error(event.message);
+          failure.fromServer = true;   // a real rejection, not a transport problem
+          throw failure;
+        }
+        if (event.phase === "done") result = event.payload;
+        else onProgress(event);
+      }
+    }
+    if (!result) throw new Error("The server closed the connection before finishing.");
+    return result;
+  }
 
   PL.backend = backend;
 })(window.PL = window.PL || {});

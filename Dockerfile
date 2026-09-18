@@ -1,6 +1,6 @@
-# Portfolio Lab API and interface.
-#   docker build -t portfolio-lab .
-#   docker run -p 8000:8000 portfolio-lab
+# Strata API and interface.
+#   docker build -t strata .
+#   docker run -p 8000:8000 strata
 FROM python:3.12-slim
 
 WORKDIR /srv
@@ -12,6 +12,6 @@ COPY src ./src
 COPY data ./data
 
 # Cached price history lives here; mount a volume to keep it between deploys.
-ENV PORTFOLIO_LAB_SOURCE=auto HOST=0.0.0.0 PORT=8000
+ENV STRATA_SOURCE=auto HOST=0.0.0.0 PORT=8000
 EXPOSE 8000
 CMD ["sh", "-c", "uvicorn app.server:api --host $HOST --port $PORT"]

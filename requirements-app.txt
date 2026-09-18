@@ -2,3 +2,7 @@
 # Install the pipeline first: pip install -r requirements.txt
 fastapi>=0.110,<1
 uvicorn[standard]>=0.27,<1
+cvxpy>=1.6,<2
+
+# Used by the API tests (fastapi.testclient)
+httpx>=0.27,<1

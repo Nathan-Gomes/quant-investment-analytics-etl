@@ -1,4 +1,4 @@
-/* Portfolio Lab interface.
+/* Strata interface.
    State lives in one object, the rail writes to it, and every render reads from
    it. The analysis itself comes from `backend`, which is the FastAPI service in
    the served app and an in-page engine in the offline demo build. */
@@ -195,7 +195,7 @@ function drawTabs() {
     const add = document.createElement("button");
     add.type = "button";
     add.className = "tab add";
-    add.textContent = "+ Compare another";
+    add.textContent = "+ Compare another portfolio";
     add.onclick = () => {
       const source = currentPortfolio();
       state.portfolios.push({
@@ -210,7 +210,8 @@ function drawTabs() {
     };
     tabs.appendChild(add);
   }
-  $("portfolio-count").textContent = state.portfolios.length > 1 ? `${state.portfolios.length} compared` : "";
+  $("portfolio-count").textContent = state.portfolios.length > 1
+    ? `${state.portfolios.length} compared` : "1 portfolio";
 }
 
 function checkTicker(input, ticker) {
@@ -258,9 +259,12 @@ function drawHoldings() {
     row.className = "holding";
     row.innerHTML = `
       <input class="ticker" value="${holding.ticker}" placeholder="TICKER" aria-label="Ticker ${index + 1}" spellcheck="false"${backend.universe ? ' list="universe"' : ""}>
-      <input class="weight" type="number" step="0.5" min="0" value="${holding.weight}" aria-label="Weight ${index + 1}" ${derived ? "disabled" : ""}>
+      <button class="step" type="button" data-delta="-1" aria-label="Decrease ${holding.ticker || "holding"} weight" title="Hold shift for 5" ${derived ? "disabled" : ""}>&minus;</button>
+      <input class="weight" type="number" step="1" min="0" value="${holding.weight}" aria-label="Weight ${index + 1}" ${derived ? "disabled" : ""}>
+      <button class="step" type="button" data-delta="1" aria-label="Increase ${holding.ticker || "holding"} weight" title="Hold shift for 5" ${derived ? "disabled" : ""}>+</button>
+      <span class="unit">%</span>
       <button class="remove" type="button" aria-label="Remove ${holding.ticker || "holding"}">&times;</button>`;
-    const [ticker, weight, remove] = row.children;
+    const [ticker, down, weight, up, , remove] = row.children;
     ticker.oninput = () => {
       holding.ticker = ticker.value.trim().toUpperCase();
       checkTicker(ticker, holding.ticker);
@@ -269,6 +273,15 @@ function drawHoldings() {
     ticker.onchange = () => { ticker.value = holding.ticker; drawTabs(); };
     checkTicker(ticker, holding.ticker);
     weight.oninput = () => { holding.weight = Number(weight.value) || 0; drawWeightBar(); };
+    const nudge = (event, delta) => {
+      // Shift steps by five, which is how most allocations are actually written.
+      const size = event.shiftKey ? 5 : 1;
+      holding.weight = Math.max(0, Math.round((holding.weight + delta * size) * 100) / 100);
+      weight.value = holding.weight;
+      drawWeightBar();
+    };
+    down.onclick = (event) => nudge(event, -1);
+    up.onclick = (event) => nudge(event, 1);
     remove.onclick = () => {
       portfolio.holdings.splice(index, 1);
       if (!portfolio.holdings.length) portfolio.holdings.push({ ticker: "", weight: 0 });
@@ -289,16 +302,19 @@ function drawWeightBar() {
   const entries = portfolio.holdings.filter((h) => h.ticker);
   const weights = derived ? entries.map(() => 1) : entries.map((h) => Math.max(h.weight, 0));
   const total = weights.reduce((a, b) => a + b, 0);
+  // Each holding gets its own colour rather than a fade of one, so the split is
+  // readable at a glance before anything has been run.
   weights.forEach((weight, index) => {
     const span = document.createElement("span");
     span.style.width = `${total ? (weight / total) * 100 : 0}%`;
-    span.style.background = `color-mix(in srgb, ${colorOf(state.active)} ${95 - index * 9}%, transparent)`;
+    span.style.background = `var(${SERIES[index % SERIES.length]})`;
+    span.title = `${entries[index].ticker}: ${total ? ((weight / total) * 100).toFixed(1) : "0.0"}%`;
     bar.appendChild(span);
   });
   const raw = portfolio.holdings.reduce((a, h) => a + (h.ticker ? Math.max(h.weight, 0) : 0), 0);
   $("weight-total").textContent = derived
     ? `${entries.length} holdings, weights computed`
-    : `Entered: ${raw.toFixed(1)}%${Math.abs(raw - 100) > 0.05 ? " — rescaled to 100%" : ""}`;
+    : `Total: ${raw.toFixed(1)}%${Math.abs(raw - 100) > 0.05 ? " — rescaled to 100%" : ""}`;
 }
 
 function writeRail() {
@@ -378,6 +394,23 @@ function bindRail() {
     drawHoldings();
     showMode();
   };
+  // Cards fold away once a decision is settled. The header is the control, so
+  // it carries the keyboard affordances a button would.
+  document.querySelectorAll(".card > header").forEach((header) => {
+    const card = header.parentElement;
+    const toggle = () => card.setAttribute("data-open", card.getAttribute("data-open") === "false" ? "true" : "false");
+    header.tabIndex = 0;
+    header.setAttribute("role", "button");
+    header.onclick = toggle;
+    header.onkeydown = (event) => {
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); toggle(); }
+    };
+  });
+  $("reset-setup").onclick = () => {
+    const preset = PRESETS.find((p) => backend.sources.includes(p.source)) || PRESETS[0];
+    history.replaceState(null, "", location.pathname);
+    loadPreset(preset);
+  };
   $("rail").onsubmit = (event) => { event.preventDefault(); run(); };
   $("theme-toggle").onclick = () => {
     const prefersDark = typeof window.matchMedia === "function"
@@ -394,7 +427,7 @@ function bindRail() {
     const blob = new Blob([JSON.stringify(state.result, null, 2)], { type: "application/json" });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    link.download = `portfolio-lab-${state.result.meta.run_id || "results"}.json`;
+    link.download = `strata-${state.result.meta.run_id || "results"}.json`;
     link.click();
     URL.revokeObjectURL(link.href);
   };
@@ -418,11 +451,15 @@ function bindRail() {
     const group = $("scheme").querySelector('optgroup[label^="Re-optimized"]');
     if (group) group.remove();
     const note = document.createElement("p");
-    note.className = "note";
-    note.style.margin = "-4px 0 10px";
+    // The weighting control sits in a two-column grid, so the note has to span
+    // it; dropped in as a plain sibling it becomes a narrow second column.
+    note.className = "note span2";
+    note.style.margin = "-2px 0 0";
     note.textContent = "Minimum variance, risk parity, maximum diversification and maximum Sharpe are "
       + "solved in the Python app; this browser demo runs the fixed rules only.";
-    $("scheme").closest(".field").after(note);
+    const cell = $("scheme").closest(".span2");
+    if (cell) cell.after(note);
+    else ($("scheme").closest(".field") || $("scheme")).after(note);
   }
   if (backend.universe) {
     const list = document.createElement("datalist");
@@ -485,23 +522,87 @@ function buildRequest() {
 
 let first = true;
 
+/* The work takes seconds, and on a sleeping free-tier host the first request
+   takes longer still. Silence for that long is indistinguishable from a hang, so
+   the button reports the stage it is in, how long it has been going, and — if
+   nothing has come back at all — that the server is probably waking up. */
+const PHASES = {
+  accepted: { label: "Request accepted", share: 0.02 },
+  prices: { label: "Loading prices", share: 0.12 },
+  align: { label: "Checking and aligning the data", share: 0.05 },
+  backtest: { label: "Walking the backtest", share: 0.45 },
+  scenarios: { label: "Simulating markets", share: 0.26 },
+  diagnostics: { label: "Risk decomposition and frontier", share: 0.10 },
+};
+
+function progressReporter(status) {
+  const started = performance.now();
+  let reached = 0;
+  let latest = "Starting";
+  let woken = false;
+
+  const bar = document.createElement("div");
+  bar.className = "progress";
+  bar.innerHTML = '<span class="progress-fill"></span>';
+  const line = document.createElement("div");
+  line.className = "progress-line";
+  status.innerHTML = "";
+  status.append(bar, line);
+
+  const paint = () => {
+    const seconds = (performance.now() - started) / 1000;
+    if (!woken && seconds > 4 && reached <= 0.02) {
+      latest = "Waking the server — a free host sleeps when idle, so the first run is slow";
+    }
+    bar.firstChild.style.width = `${Math.min(reached, 0.97) * 100}%`;
+    line.textContent = `${latest} · ${seconds.toFixed(1)}s`;
+  };
+  const timer = setInterval(paint, 100);
+  paint();
+
+  return {
+    update(event) {
+      woken = true;
+      const phase = PHASES[event.phase];
+      if (!phase) return;
+      let done = 0;
+      for (const [name, spec] of Object.entries(PHASES)) {
+        if (name === event.phase) break;
+        done += spec.share;
+      }
+      // Within a phase, step/steps says how far along it is.
+      const within = event.steps ? (event.step - 1) / event.steps : 0;
+      reached = Math.max(reached, done + phase.share * within);
+      latest = event.detail ? `${phase.label}: ${event.detail}` : phase.label;
+      paint();
+    },
+    finish() { clearInterval(timer); },
+    elapsed() { return performance.now() - started; },
+  };
+}
+
 async function run() {
   const button = $("run");
   const status = $("run-status");
   button.disabled = true;
-  status.innerHTML = '<span class="spinner"></span> Running backtest and scenarios…';
+  const reporter = progressReporter(status);
   try {
     const request = buildRequest();
-    const started = performance.now();
-    const result = await backend.analyze(request);
+    const result = await backend.analyze(request, (event) => reporter.update(event));
+    reporter.finish();
     state.result = result;
     state.selected = result.portfolios.find((p) => !p.is_benchmark)?.name || result.portfolios[0].name;
-    status.textContent = `Done in ${((performance.now() - started) / 1000).toFixed(1)}s · ${result.meta.trading_days.toLocaleString()} shared sessions · ${result.meta.settings.paths.toLocaleString()} simulated markets`;
+    const timings = result.meta.timings_ms;
+    status.textContent = `Done in ${(reporter.elapsed() / 1000).toFixed(1)}s · `
+      + `${result.meta.trading_days.toLocaleString()} shared sessions · `
+      + `${result.meta.settings.paths.toLocaleString()} simulated markets`
+      + (timings ? ` · engine ${(timings.total / 1000).toFixed(1)}s` : "");
     showMode(result.meta.source);
     renderResults();
     if (!first) revealResults();
     first = false;
   } catch (error) {
+    reporter.finish();
     renderError(error.message || String(error), status);
   } finally {
     button.disabled = false;
@@ -915,6 +1016,41 @@ function optimizationPlate(result) {
       + `and the portfolio realized ${charts.percent(focus.summary.volatility)}, `
       + `${ratio > 1.15 ? `${charts.ratio(ratio, 1)}x the estimate — estimated covariance understates risk when correlations rise in stress, which is exactly when it matters` : "close to the estimate"}.`;
     node.appendChild(gap);
+  }
+
+  if (focus && (focus.optimization.risk_model || focus.optimization.solver)) {
+    const model = focus.optimization.risk_model;
+    const solver = focus.optimization.solver;
+    const detail = document.createElement("div");
+    detail.style.marginBottom = "20px";
+    const rows = [];
+    if (model) {
+      const kind = { statistical_factor: "Statistical factor model", ledoit_wolf: "Ledoit-Wolf shrinkage", sample: "Sample covariance" }[model.kind] || model.kind;
+      rows.push(["Risk model", model.factors
+        ? `${kind}, ${model.factors} factor${model.factors > 1 ? "s" : ""} explaining ${charts.percent(model.explained_variance, 0)} of the correlation structure`
+        : `${kind}, shrinkage ${charts.percent(model.shrinkage_intensity, 1)}`]);
+      rows.push(["Condition number", `${Math.round(model.condition_number).toLocaleString()} — how close the covariance is to singular, and how far an optimizer can be misled by its calmest-looking direction`]);
+      if (model.attribution && model.attribution.factor_share > 0) {
+        rows.push(["Variance split", `${charts.percent(model.attribution.factor_share, 0)} common factors, ${charts.percent(1 - model.attribution.factor_share, 0)} holding-specific`]);
+      }
+    }
+    if (solver) {
+      rows.push(["Solver", `${solver.name}, ${solver.status} in ${(solver.seconds * 1000).toFixed(0)} ms`
+        + (solver.reformulation ? ` · ${solver.reformulation}` : "")]);
+      const prices = Object.entries(solver.shadow_prices || {}).filter(([k]) => k !== "budget");
+      rows.push(["Binding constraints", solver.binding_constraints.length
+        ? solver.binding_constraints.join(", ") + (prices.length
+          ? ` — shadow prices ${prices.map(([k, v]) => `${k} ${v.toFixed(5)}`).join(", ")}`
+          : "")
+        : "none; the optimum is interior, so every limit has room"]);
+      if (solver.note) rows.push(["Note", solver.note]);
+    }
+    detail.innerHTML = '<h3 style="margin-bottom:8px">How the answer was reached</h3>'
+      + '<table class="data"><tbody>' + rows.map(([k, v]) =>
+        `<tr style="cursor:default"><td class="label" style="white-space:nowrap">${escapeHtml(k)}</td>`
+        + `<td class="label faint" style="text-align:left">${escapeHtml(String(v))}</td></tr>`).join("")
+      + "</tbody></table>";
+    node.appendChild(detail);
   }
 
   const grid = document.createElement("div");
