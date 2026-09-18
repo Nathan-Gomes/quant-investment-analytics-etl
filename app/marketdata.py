@@ -150,7 +150,7 @@ def load(tickers: list[str], start: str, end: str, source: str = "auto") -> Pric
             "sector": info.get("sector", "Unclassified"),
             "currency": info.get("currency"),
         })
-    if failures and source == "yahoo":
+    if failures:
         raise ValueError("Could not load " + "; ".join(failures))
     if not frames:
         raise ValueError(

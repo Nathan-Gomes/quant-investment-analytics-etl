@@ -30,7 +30,8 @@
           backend.bundledUniverse = null;
         }
       } catch (error) {
-        backend.defaultSource = "bundled";
+        // A temporary health-check failure must never change the user's data source.
+        backend.defaultSource = "auto";
       }
     },
 
