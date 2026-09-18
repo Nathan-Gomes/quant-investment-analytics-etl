@@ -282,7 +282,3 @@ This is research tooling for studying historical data under stated assumptions. 
 | [`docs/ADDING_A_METHODOLOGY.md`](docs/ADDING_A_METHODOLOGY.md) | The contract, the gate, and a worked example |
 | [`docs/HANDOFF.md`](docs/HANDOFF.md) | Deploying it |
 | [`docs/README_pipeline_detail.md`](docs/README_pipeline_detail.md) | Portfolio definitions, conventions, SQL mart, validation rules |
-
-## Presentation reference
-
-The screenshot-led walkthrough was informed by [Genesis Synapse Showcase](https://github.com/ColinLefter/Genesis-Synapse-Showcase). All screenshots show Strata; no Genesis code or product assets are included.
