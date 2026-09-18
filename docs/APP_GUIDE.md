@@ -193,7 +193,7 @@ The Yahoo path is covered by tests that substitute a stand-in provider, so the
 download, caching, profile lookup and failure messages are exercised without a
 network and without depending on the provider being up.
 
-`tests/test_optimize.py` checks the solvers against closed forms where one
+`tests/application/test_optimize.py` checks the solvers against closed forms where one
 exists — the two-asset minimum-variance weight, equal risk contributions under
 risk parity, the exact Euler decomposition of volatility, and the equality of
 weight share and risk share at a minimum-variance optimum — and the shrinkage

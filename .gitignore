@@ -20,3 +20,9 @@ data/synthetic_prices.json
 # Web app
 app/cache/
 dist/
+
+# Local settings and credentials
+.env
+.env.*
+!.env.example
+.DS_Store

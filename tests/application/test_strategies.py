@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from app import analysis, conformance, strategies  # noqa: E402
@@ -21,7 +21,7 @@ from app.engine import Portfolio, Settings  # noqa: E402
 from app.optimize import Constraints, minimum_variance  # noqa: E402
 from app.strategies import Context, Strategy  # noqa: E402
 
-from tests.test_optimize import synthetic_prices  # noqa: E402
+from tests.application.test_optimize import synthetic_prices  # noqa: E402
 
 
 @pytest.fixture

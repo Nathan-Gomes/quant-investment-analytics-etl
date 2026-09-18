@@ -188,7 +188,7 @@ PASS  inverse_variance
   ok  scales to 60 assets: solved in 67 ms
 ```
 
-Fifteen checks, identical data for every methodology, non-zero exit on failure, run in CI beside the unit tests. Each exists because that class of failure is silent: the code returns a plausible weight vector and the damage only appears in the P&L. `tests/test_strategies.py` defines methodologies broken in each of those ways and asserts the harness fails them on the check that names the fault.
+Fifteen checks, identical data for every methodology, non-zero exit on failure, run in CI beside the unit tests. Each exists because that class of failure is silent: the code returns a plausible weight vector and the damage only appears in the P&L. `tests/application/test_strategies.py` defines methodologies broken in each of those ways and asserts the harness fails them on the check that names the fault.
 
 The battery earned its place on its first run by failing `maximum_sharpe` on speed, at 1,070 ms against a 750 ms budget. See [`docs/ADDING_A_METHODOLOGY.md`](docs/ADDING_A_METHODOLOGY.md).
 
@@ -237,6 +237,10 @@ flowchart LR
 
 ## Project structure
 
+Strata separates the deployed application from the original research pipeline.
+Start with the [developer guide](CONTRIBUTING.md) for setup and commands, or the
+[architecture guide](docs/ARCHITECTURE.md) for component responsibilities.
+
 ```text
 app/         The bench: engine, convex optimizer, risk models, strategy
              registry, conformance harness, provenance, market data,
@@ -244,11 +248,16 @@ app/         The bench: engine, convex optimizer, risk models, strategy
 src/         The pipeline: extract, validation, analytics, scenarios, report, SQL load
 data/        Frozen prices, holdings, security master
 sql/         Views using joins, CTEs, aggregations and window functions
-tests/       Regression tests: parity, solver correctness against closed forms,
-             no-look-ahead, mandate compliance, scale, conformance
+tests/
+  application/  App, API, optimizer, no-look-ahead and cross-engine parity tests
+  research/     Research calculations, validation and reporting tests
+scripts/     Research reporting and notebook utilities
 tools/       Single-file demo build, cross-language test harness
 docs/        Review guide, app guide, methodology guide, handoff brief
 notebooks/   Executed research notebook
+output/      Published research evidence (not live application state)
+.github/     Automated validation and artifact builds
+Makefile     Standard development commands: make run, make check, make demo
 ```
 
 ## Limits

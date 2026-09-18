@@ -8,7 +8,7 @@ the same inputs therefore produce the same scenario numbers on either side,
 which keeps a result someone shares reproducible by whoever reviews it.
 
 Bit-level equivalence with ``static/rng.js`` is covered by
-``tests/test_app_engine.py::test_prng_matches_javascript``.
+``tests/application/test_app_engine.py::test_prng_matches_javascript``.
 """
 
 from __future__ import annotations

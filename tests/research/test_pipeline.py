@@ -1,3 +1,5 @@
+"""Regression checks for the reproducible research pipeline."""
+
 import sqlite3
 
 import numpy as np

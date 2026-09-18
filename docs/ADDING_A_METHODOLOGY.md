@@ -110,7 +110,7 @@ frontier sweep, since a positive-definite quadratic over a convex set has one
 optimum and restarts buy nothing there. That is a five-fold speed-up with no
 change to any result.
 
-The suite in `tests/test_strategies.py` defines methodologies that are broken in
+The suite in `tests/application/test_strategies.py` defines methodologies that are broken in
 each of these ways and asserts the harness fails them on the check that names
 the fault. A gate nobody has tried to fool is decoration.
 

@@ -3,7 +3,7 @@
    The offline demo has no server, so the backtest and the block bootstrap run
    here instead. Both sides share the mulberry32 generator, so the same seed
    produces the same scenarios in Python and in the browser, and the parity test
-   in tests/test_app_engine.py checks that the numbers agree. */
+   in tests/application/test_app_engine.py checks that the numbers agree. */
 (function (PL) {
   "use strict";
 

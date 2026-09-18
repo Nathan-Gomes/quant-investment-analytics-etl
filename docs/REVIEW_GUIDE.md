@@ -16,7 +16,7 @@ This is a quantitative research and decision-support pipeline. It turns raw pric
 4. Read [forward.py](../src/forward.py) for the five-year block-bootstrap scenario engine.
 5. Read [scenario_risk.py](../src/scenario_risk.py) for downside, paired Growth-versus-Balanced, and sampling-sensitivity measures.
 6. Open `output/report.html` or `output/notebook.html` for the evidence a non-technical reviewer can scan.
-7. Review `tests/test_pipeline.py` for calculations, data validation, chronology, and reproducibility checks.
+7. Review `tests/research/test_pipeline.py` for calculations, data validation, chronology, and reproducibility checks.
 
 ## Decision flow
 
