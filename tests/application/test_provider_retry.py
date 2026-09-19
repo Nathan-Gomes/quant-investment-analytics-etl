@@ -36,15 +36,41 @@ def test_retry_and_known_metadata(monkeypatch, tmp_path):
     assert info["currency"] == "CAD"
 
 
-@pytest.mark.parametrize("source", ["auto", "yahoo"])
-def test_refusal_never_substitutes_bundled_prices(monkeypatch, source):
+def test_yahoo_source_never_substitutes_bundled_prices(monkeypatch):
+    """An explicit request for live data must fail loudly, not go quiet with old data."""
     monkeypatch.setattr(marketdata, "require_provider", lambda: object())
     def refuse(*args):
         raise RuntimeError("HTTP 429")
     monkeypatch.setattr(marketdata, "download", refuse)
     monkeypatch.setattr(marketdata, "load_bundled", lambda *args: pytest.fail("Unexpected frozen fallback"))
-    with pytest.raises(ValueError, match="429"):
-        marketdata.load(["RY.TO"], "2025-01-01", "2025-12-31", source)
+    with pytest.raises(ValueError, match="rate-limiting"):
+        marketdata.load(["RY.TO"], "2025-01-01", "2025-12-31", "yahoo")
+
+
+def test_auto_source_degrades_to_bundled_only_when_rate_limited_and_fully_covered(monkeypatch):
+    """A refusal on 'auto' may fall back to the frozen dataset, but only announced, and only when it can answer for every requested ticker."""
+    monkeypatch.setattr(marketdata, "require_provider", lambda: object())
+    monkeypatch.setattr(marketdata, "download", lambda *args: (_ for _ in ()).throw(RuntimeError("HTTP 429")))
+    fallback = marketdata.load(["RY.TO"], "2025-01-01", "2025-12-31", "auto")
+    assert fallback.degraded is True
+    assert "rate-limited" in fallback.note
+
+    def not_covered(*args):
+        raise RuntimeError("HTTP 429")
+    monkeypatch.setattr(marketdata, "download", not_covered)
+    with pytest.raises(ValueError, match="rate-limiting"):
+        marketdata.load(["RY.TO", "NOSUCH.TO"], "2025-01-01", "2025-12-31", "auto")
+
+
+def test_auto_source_still_rejects_non_rate_limited_partial_downloads(monkeypatch):
+    """A missing symbol is not a rate limit, so 'auto' must not silently narrow the universe."""
+    monkeypatch.setattr(marketdata, "require_provider", lambda: object())
+    def refuse(ticker, *args):
+        raise RuntimeError(f"{ticker}: no data found, symbol may be delisted")
+    monkeypatch.setattr(marketdata, "download", refuse)
+    monkeypatch.setattr(marketdata, "load_bundled", lambda *args: pytest.fail("Unexpected frozen fallback"))
+    with pytest.raises(ValueError, match="NOSUCH"):
+        marketdata.load(["NOSUCH.TO"], "2025-01-01", "2025-12-31", "auto")
 
 
 def test_non_rate_errors_are_not_retryable():

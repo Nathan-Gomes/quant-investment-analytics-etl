@@ -59,6 +59,7 @@ def analyze(
     source_note: str = "",
     request: dict | None = None,
     progress=None,
+    source_warning: str | None = None,
 ) -> dict:
     settings.validate()
     if not portfolios:
@@ -79,6 +80,9 @@ def analyze(
             progress({"phase": name, "detail": detail, "elapsed_ms": round(elapsed, 1)})
 
     warnings: list[str] = []
+    if source_warning:
+        # A fallback that is not announced is a silent substitution.
+        warnings.append(source_warning)
     wide_all = engine.to_wide(prices)
     if start:
         wide_all = wide_all[wide_all.index >= pd.Timestamp(start)]

@@ -1,0 +1,31 @@
+# A free instance sleeps after fifteen minutes idle, and the next visitor waits
+# through a cold start on the host's own loading page before the app appears.
+# This keeps it awake during the hours it is likely to be opened.
+#
+# Scheduled runs are best-effort: GitHub delays them under load, and they are
+# disabled automatically on repositories with no activity for 60 days. This
+# reduces the chance of a cold start; it does not remove it. A paid instance is
+# the only way to remove it.
+name: Keep the app warm
+
+on:
+  schedule:
+    # Every ten minutes, 11:00-23:00 UTC (07:00-19:00 Eastern).
+    - cron: "*/10 11-23 * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wake the service
+        run: |
+          URL="${{ vars.STRATA_URL || 'https://nathan-portfolio-lab.onrender.com' }}"
+          for attempt in 1 2 3; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 90 "$URL/api/health" || true)
+            echo "attempt $attempt: $code"
+            [ "$code" = "200" ] && exit 0
+            sleep 20
+          done
+          echo "Service did not respond; it may be suspended or redeploying."
+          exit 0    # a missed ping is not a build failure
