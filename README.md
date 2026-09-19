@@ -12,7 +12,7 @@ The live app supports Yahoo Finance tickers and Python optimization. The offline
 
 [![Tests](https://github.com/Nathan-Gomes/quant-investment-analytics-etl/actions/workflows/test.yml/badge.svg)](https://github.com/Nathan-Gomes/quant-investment-analytics-etl/actions/workflows/test.yml)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
-![Tests](https://img.shields.io/badge/tests-167%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-168%20passing-brightgreen)
 ![Conformance](https://img.shields.io/badge/methodologies-12%2F12%20conform-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
@@ -231,9 +231,10 @@ flowchart LR
 | A result can be traced | Every response carries a run identifier derived from the request, a digest of the price values used, a digest of the source, and the library versions — the same study on the same data always carries the same identifier |
 | A study can be shared | The whole setup encodes into the link, so a colleague opens the identical study rather than a description of one |
 | Simulation precision is visible | Live results include 95% sampling intervals for estimated percentiles; these do not measure model uncertainty or guarantee future outcomes |
+| Three implementations agree | Minimum variance and risk parity are solved by cvxpy in Python, by projected gradient and coordinate descent in the browser, and independently in MATLAB. Tests compare all three; CI runs the MATLAB one under Octave |
 
 ```
-167 tests · 12/12 methodologies conform · report, notebook and demo rebuilt on every push
+168 tests · 12/12 methodologies conform · report, notebook and demo rebuilt on every push
 ```
 
 ## Project structure
@@ -243,6 +244,8 @@ Start with the [developer guide](CONTRIBUTING.md) for setup and commands, or the
 [architecture guide](docs/ARCHITECTURE.md) for component responsibilities.
 
 ```text
+matlab/      Independent MATLAB implementation of the two optimizers, used as a
+             cross-check; runs in Octave, no toolbox required
 app/         The bench: engine, convex optimizer, risk models, strategy
              registry, conformance harness, provenance, market data,
              FastAPI service, interface

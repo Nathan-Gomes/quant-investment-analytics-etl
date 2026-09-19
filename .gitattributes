@@ -1,11 +1,26 @@
-# Keep published artifacts available without counting them as application source.
-output/** linguist-generated=true
-dist/** linguist-generated=true
-notebooks/*.ipynb linguist-documentation=true
-docs/** linguist-documentation=true
-# Input datasets are not source code.
-data/*.csv linguist-vendored=true
+# GitHub's language bar weighs bytes of committed files, and this repository
+# commits its own outputs: a 6.5 MB offline research report, an exported
+# notebook, and a single-file build of the app with the price dataset embedded
+# in it. Those are artifacts the pipeline produces, not source anyone wrote, and
+# left unmarked they drown 6,400 lines of Python in 82% HTML.
+#
+# Linguist has a vocabulary for this. Marking them keeps them in the repository —
+# the README links the report, and the demo is what the portfolio site serves —
+# while excluding them from the language statistics and collapsing them in diffs,
+# which is also what you want when reviewing a pull request.
 
+output/**               linguist-generated=true
+dist/**                 linguist-generated=true
+notebooks/*.ipynb       linguist-documentation=true
+docs/**                 linguist-documentation=true
+
+# The frozen price data is input, not code.
+data/*.csv              linguist-generated=true
+
+# MATLAB sources are hand-written and should count; their exported inputs are not.
+outputs/matlab/**       linguist-generated=true
+
+# Normalize line endings so a Windows checkout does not rewrite every file.
 * text=auto eol=lf
 *.png binary
 *.zip binary

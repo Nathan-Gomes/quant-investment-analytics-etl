@@ -228,6 +228,7 @@ def _analyze(request: AnalysisRequest, progress=None) -> dict:
         metadata=priceset.metadata, start=start, end=end,
         source_note=priceset.note, request=payload_request,
         progress=progress,
+        source_warning=priceset.note if getattr(priceset, "degraded", False) else None,
     )
     payload["meta"]["result_cache_hit"] = False
     with _RESULT_CACHE_LOCK:

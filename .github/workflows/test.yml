@@ -17,6 +17,12 @@ jobs:
       - run: python -m src.pipeline --source synthetic
       - run: python scripts/build_notebook.py
       - run: python tools/build_demo.py
+      # The MATLAB implementation is only worth having if it actually runs.
+      # Octave executes the same .m files, so the third implementation is
+      # verified on every push without a MATLAB licence in CI.
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends octave
+      - run: python -m tools.export_for_matlab
+      - run: octave --no-gui matlab/verify_against_python.m
       - uses: actions/upload-artifact@v4
         with:
           name: synthetic-research-report
