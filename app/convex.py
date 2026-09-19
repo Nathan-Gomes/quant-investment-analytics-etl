@@ -584,6 +584,24 @@ def risk_parity(model: RiskModel, mandate: Mandate, budget: np.ndarray | None = 
         raise ValueError(f"The risk-parity program returned '{problem.status}'.")
 
     raw = np.asarray(y.value, dtype=float).ravel()
+    # Polish the log-barrier first-order condition when conic termination leaves
+    # a small residual. Newton steps retain positivity through backtracking.
+    covariance = model.covariance
+    for _ in range(12):
+        gradient = covariance @ raw - shares / raw
+        if np.max(np.abs(gradient)) < 1e-13:
+            break
+        direction = np.linalg.solve(covariance + np.diag(shares / raw ** 2), gradient)
+        scale = 1.0
+        residual = np.linalg.norm(gradient)
+        while scale > 1e-8:
+            candidate = raw - scale * direction
+            if np.all(candidate > 0) and np.linalg.norm(covariance @ candidate - shares / candidate) < residual:
+                raw = candidate
+                break
+            scale *= 0.5
+        else:
+            raise ValueError("Risk-parity refinement failed to reduce the optimality residual.")
     weights = raw / raw.sum()
     if weights.max() > mandate.max_weight + 1e-6:
         # The unconstrained solution breaches the cap, so re-solve as a

@@ -263,14 +263,18 @@ def test_prng_matches_javascript():
 
 
 @pytest.mark.skipif(NODE is None, reason="node is not installed")
-def test_browser_engine_agrees_with_python():
+@pytest.mark.parametrize("objective", [None, "minimum_variance_convex", "risk_parity_convex"])
+def test_browser_engine_agrees_with_python(objective):
     from tools.build_demo import dataset_js
+    study = json.loads(json.dumps(REQUEST))
+    if objective:
+        study["portfolios"] = [{**study["portfolios"][1], "scheme": "optimized", "objective": objective}]
 
     with tempfile.TemporaryDirectory() as folder:
         dataset = Path(folder) / "dataset.js"
         request = Path(folder) / "request.json"
         dataset.write_text(dataset_js())
-        request.write_text(json.dumps(REQUEST))
+        request.write_text(json.dumps(study))
         completed = subprocess.run(
             [NODE, str(ROOT / "tools/js_engine_harness.mjs"), str(dataset), str(request)],
             capture_output=True, text=True, check=True, cwd=ROOT,
@@ -278,7 +282,7 @@ def test_browser_engine_agrees_with_python():
     browser = json.loads(completed.stdout)
 
     priceset = marketdata.load_bundled(None)
-    portfolios = [Portfolio(p["name"], p["weights"], p["scheme"]) for p in REQUEST["portfolios"]]
+    portfolios = [Portfolio(**p) for p in study["portfolios"]]
     python = analysis.analyze(
         priceset.prices, portfolios,
         Settings(benchmark="XIC.TO", paths=REQUEST["paths"], seed=REQUEST["seed"]),

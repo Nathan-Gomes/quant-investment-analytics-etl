@@ -14,7 +14,7 @@ services:
       - key: STRATA_CACHE_HOURS
         value: "72"
       - key: STRATA_DOWNLOAD_WORKERS
-        value: "8"
+        value: "3"
     # A persistent disk retains cache files across restarts. New or expired
     # requests still need downloads. Free instances
     # cannot mount one; on a paid plan, uncomment this.

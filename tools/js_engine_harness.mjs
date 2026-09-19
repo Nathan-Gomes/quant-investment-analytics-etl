@@ -17,7 +17,7 @@ const sandbox = { window: {}, console, setTimeout, performance };
 sandbox.globalThis = sandbox;
 vm.createContext(sandbox);
 
-for (const source of [datasetPath, path.join(staticDir, "engine.js"), path.join(staticDir, "backend-local.js")]) {
+for (const source of [datasetPath, path.join(staticDir, "optimize.js"), path.join(staticDir, "engine.js"), path.join(staticDir, "backend-local.js")]) {
   vm.runInContext(readFileSync(source, "utf8"), sandbox, { filename: source });
 }
 

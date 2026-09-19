@@ -119,13 +119,116 @@
     };
   }
 
+  function optimizerReport(portfolio, state, run) {
+    if (!state || !state.last) return null;
+    const solved = state.last;
+    const risk = solved.risk;
+    const rebalances = Math.max(state.history.length - 1, 0);
+    const turnover = run.summary.total_turnover;
+    const stability = weightStability(portfolio, state);
+    return {
+      objective: portfolio.objective,
+      label: portfolio.label || portfolio.objective,
+      estimator: portfolio.estimator || "ledoit_wolf",
+      estimation_days: portfolio.estimation_days || 252,
+      max_weight: portfolio.max_weight || 1,
+      reoptimizations: state.history.length,
+      turnover_per_rebalance: rebalances ? turnover / rebalances : 0,
+      annual_turnover: turnover / Math.max(run.summary.years, 1e-9),
+      shrinkage_intensity: solved.shrinkage_intensity,
+      mean_shrinkage_intensity: 0,
+      expected_volatility: risk.volatility,
+      expected_return: null,
+      diversification_ratio: risk.diversification_ratio,
+      effective_bets: risk.effective_bets,
+      risk_model: {
+        kind: portfolio.estimator === "sample" ? "sample" : "ledoit_wolf",
+        assets: state.universe.length,
+        shrinkage_intensity: solved.shrinkage_intensity,
+        factors: 0,
+        explained_variance: 0,
+        condition_number: null,
+      },
+      solver: {
+        name: "browser (projected gradient / coordinate descent)",
+        status: "computed",
+        seconds: 0,
+        binding_constraints: solved.weights.some((w) => w > (portfolio.max_weight || 1) - 1e-6) ? ["cap"] : [],
+        shadow_prices: {},
+        reformulation: portfolio.objective.startsWith("risk_parity") ? "log-barrier" : "projected gradient",
+        note: null,
+      },
+      stability,
+      holdings: state.universe.map((ticker, i) => ({
+        ticker,
+        weight: solved.weights[i],
+        risk_share: risk.share[i],
+        marginal_risk: null,
+        weight_p05: stability ? stability.percentiles.p05[i] : null,
+        weight_p95: stability ? stability.percentiles.p95[i] : null,
+      })),
+      weight_history: {
+        dates: state.history.map((row) => row.date),
+        tickers: state.universe,
+        weights: state.history.map((row) => row.weights.map((w) => Math.round(w * 1e6) / 1e6)),
+      },
+    };
+  }
+
+  /** Re-solve on bootstrapped samples to size the estimation error in the weights. */
+  function weightStability(portfolio, state, draws = 12) {
+    const context = state.lastSample;
+    if (!context) return null;
+    const rows = context.length;
+    let seed = 9;
+    const random = () => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      return seed / 0x7fffffff;
+    };
+    const solutions = [];
+    for (let draw = 0; draw < draws; draw += 1) {
+      const sample = [];
+      for (let i = 0; i < rows; i += 1) sample.push(context[Math.floor(random() * rows)]);
+      try {
+        solutions.push(PL.optimize.solve(portfolio.objective, sample, state.constraints,
+                                         portfolio.estimator).weights);
+      } catch (error) { /* a failed draw is skipped, as in Python */ }
+    }
+    if (solutions.length < 3) return null;
+    const n = state.universe.length;
+    const quantile = (values, q) => {
+      const sorted = [...values].sort((a, b) => a - b);
+      const position = (sorted.length - 1) * q;
+      const low = Math.floor(position);
+      const high = Math.ceil(position);
+      return low === high ? sorted[low] : sorted[low] + (sorted[high] - sorted[low]) * (position - low);
+    };
+    const p05 = [], p95 = [], median = [];
+    let move = 0;
+    for (let i = 0; i < n; i += 1) {
+      const column = solutions.map((w) => w[i]);
+      p05.push(quantile(column, 0.05));
+      p95.push(quantile(column, 0.95));
+      median.push(quantile(column, 0.5));
+      move += column.reduce((sum, v) => sum + Math.abs(v - state.last.weights[i]), 0) / column.length / n;
+    }
+    return {
+      mean_absolute_move: move,
+      widest_range: Math.max(...p95.map((v, i) => v - p05[i])),
+      draws: solutions.length,
+      percentiles: { p05, median, p95 },
+    };
+  }
+
   function analyze(request) {
     const data = PL.DATA;
-    if (request.portfolios.some((p) => p.scheme === "optimized")) {
+    const unsupported = request.portfolios.find(
+      (p) => p.scheme === "optimized" && !PL.optimize.objectives.includes(p.objective));
+    if (unsupported) {
       throw new Error(
-        "Portfolio optimization runs in the Python app, not in this browser demo. "
-        + "Run the app locally to solve for minimum variance, risk parity, maximum diversification "
-        + "or maximum Sharpe.",
+        `${unsupported.objective} is solved by the Python app. This browser build runs minimum `
+        + "variance and risk parity. The other "
+        + "objectives require the Python app.",
       );
     }
     const E = engine();
@@ -159,12 +262,16 @@
     });
 
     const needsCalibration = request.portfolios.some((p) => p.scheme === "inverse_volatility");
-    const requested = 252;
-    const warmup = needsCalibration ? Math.min(requested, Math.floor(dates.length / 3)) : 0;
-    if (needsCalibration && warmup < requested) {
+    const estimationNeed = Math.max(0, ...request.portfolios
+      .filter((p) => p.scheme === "optimized")
+      .map((p) => p.estimation_days || 252));
+    const requested = Math.max(needsCalibration ? 252 : 0, estimationNeed);
+    const warmup = requested ? Math.min(requested, Math.floor(dates.length / 3)) : 0;
+    if (requested && warmup < requested) {
       warnings.push(
-        `Inverse-volatility weights were calibrated on ${warmup} sessions rather than ${requested}, because ` +
-        "the window is short. Those calibration sessions are excluded from every reported result.",
+        `Weights were estimated on ${warmup} sessions rather than the ${requested} requested, because the ` +
+        "window is short. Those sessions are used only to set the opening weights and are excluded from " +
+        "every reported result.",
       );
     }
     const calibration = dailyReturns.map((series) => series.subarray(0, warmup || series.length));
@@ -195,6 +302,12 @@
     const portfolios = request.portfolios.map((p) => ({
       name: p.name,
       scheme: p.scheme,
+      // The optimizer settings travel with the portfolio; dropping them here
+      // left the solver without an objective.
+      objective: p.objective,
+      estimation_days: p.estimation_days,
+      max_weight: p.max_weight,
+      estimator: p.estimator,
       weights: Object.fromEntries(Object.entries(p.weights).map(([k, v]) => [k.toUpperCase(), v])),
       is_benchmark: false,
     }));
@@ -207,6 +320,46 @@
       });
     }
 
+    // Returns over the whole aligned window, for the walk-forward estimator.
+    const fullReturns = [];
+    for (let i = 1; i < dates.length; i += 1) {
+      const row = new Float64Array(tickers.length);
+      for (let t = 0; t < tickers.length; t += 1) row[t] = matrix[t][i] / matrix[t][i - 1] - 1;
+      fullReturns.push(row);
+    }
+
+    const optimizerState = {};
+
+    function makeProvider(portfolio) {
+      // The same contract as the Python side: the slice ends at the session being
+      // traded and never reaches past it, which is what makes it walk-forward.
+      const chosen = tickers.filter((t) => portfolio.weights[t] !== undefined);
+      if (chosen.length < 2) throw new Error(`${portfolio.name}: optimization needs at least two holdings.`);
+      const positions = chosen.map((t) => tickers.indexOf(t));
+      const span = portfolio.estimation_days || 252;
+      const constraints = { max_weight: portfolio.max_weight || 1, min_weight: 0 };
+      const state = { universe: chosen, positions, history: [], last: null, constraints };
+      optimizerState[portfolio.name] = state;
+
+      return (position) => {
+        const end = warmup + position + 1;
+        const start = Math.max(1, end - span);
+        const sample = [];
+        for (let i = start; i < end; i += 1) {
+          const row = new Array(positions.length);
+          for (let c = 0; c < positions.length; c += 1) row[c] = fullReturns[i - 1][positions[c]];
+          sample.push(row);
+        }
+        const solved = PL.optimize.solve(portfolio.objective, sample, constraints, portfolio.estimator);
+        state.last = solved;
+        state.lastSample = sample;
+        state.history.push({ date: dates[end - 1], weights: solved.weights });
+        const full = new Float64Array(tickers.length);
+        positions.forEach((p, c) => { full[p] = solved.weights[c]; });
+        return full;
+      };
+    }
+
     const runs = portfolios.map((portfolio) => {
       const total = portfolio.scheme === "custom"
         ? Object.values(portfolio.weights).reduce((a, b) => a + Math.max(b, 0), 0) : 1;
@@ -216,9 +369,18 @@
           "rescaled to 100% while keeping their proportions.",
         );
       }
-      const target = resolveWeights(portfolio, tickers, calibration);
+      const optimizing = portfolio.scheme === "optimized";
+      if (optimizing && (portfolio.is_benchmark || settings.rebalance === "none")) {
+        throw new Error(
+          `${portfolio.name}: an optimized portfolio needs a rebalance schedule, because that is when it `
+          + "re-estimates. Choose monthly, quarterly or annual.");
+      }
+      const provider = optimizing ? makeProvider(portfolio) : null;
+      const target = optimizing ? new Float64Array(tickers.length)
+        : resolveWeights(portfolio, tickers, calibration);
       const schedule = portfolio.is_benchmark ? "none" : settings.rebalance;
-      return { portfolio, target, run: E.backtest(windowMatrix, windowDates, target, settings, schedule) };
+      const run = E.backtest(windowMatrix, windowDates, target, settings, schedule, provider);
+      return { portfolio, target: provider ? Array.from(run.targetHistory[0].weights) : target, run };
     });
 
     const horizonDays = Math.round(settings.horizon_years * E.TRADING_DAYS);
@@ -306,6 +468,7 @@
           summary: cleanObject(scenario.summary),
           histogram: { counts },
         },
+        optimization: optimizerReport(portfolio, optimizerState[portfolio.name], run),
         versus_benchmark: benchmarkIndex >= 0 && !portfolio.is_benchmark
           ? cleanObject(E.pairedComparison(
             scenario.terminal, scenarios[benchmarkIndex].terminal, portfolio.name, benchmarkName,
@@ -386,8 +549,13 @@
 
   PL.backend = {
     sources: ["bundled"],
-    // The solvers live in Python; this build has no server to run them.
-    supportsOptimization: false,
+    // Minimum variance and risk parity translate exactly to JavaScript and run
+    // here; the ratio-based and mandate-constrained objectives stay in Python.
+    supportsOptimization: true,
+    // Both spellings: the registry carries a local-search and a convex version of
+    // each, and this file implements the convex answer for either name.
+    objectives: ["minimum_variance", "minimum_variance_convex",
+                 "risk_parity", "risk_parity_convex"],
     defaultSource: "bundled",
     allowsSourceChoice: false,
     autorun: true,

@@ -10,7 +10,11 @@ implementation, so that replacing a local search with a convex program is shown
 to change the method rather than the answer.
 """
 
+import json
+import shutil
+import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -327,3 +331,86 @@ def test_the_mandate_does_not_inherit_objectives_from_the_parameter_bag(returns)
     mandate = context.mandate()
     assert mandate.tracking_error_limit is None
     assert mandate.spread_bps == 0
+
+
+# --------------------------------------------------------------------------- #
+# The browser optimizer must agree with cvxpy
+# --------------------------------------------------------------------------- #
+
+NODE = shutil.which("node")
+
+
+def solve_in_browser(objective: str, returns: np.ndarray, cap: float,
+                     estimator: str = "ledoit_wolf") -> np.ndarray:
+    """Run app/static/optimize.js through Node and return its weights."""
+    with tempfile.TemporaryDirectory() as folder:
+        request = Path(folder) / "request.json"
+        request.write_text(json.dumps({
+            "objective": objective, "returns": returns.tolist(),
+            "constraints": {"max_weight": cap, "min_weight": 0.0},
+            "estimator": estimator,
+        }))
+        completed = subprocess.run(
+            [NODE, str(ROOT / "tools/js_optimizer_harness.mjs"), str(request)],
+            capture_output=True, text=True, check=True, cwd=ROOT,
+        )
+    return np.array(json.loads(completed.stdout)["weights"])
+
+
+@pytest.mark.skipif(NODE is None, reason="node is not installed")
+@pytest.mark.parametrize("objective,tolerance", [
+    ("minimum_variance", 2e-6),   # accelerated projected gradient
+    ("risk_parity", 1e-9),        # closed-form coordinate updates
+])
+@pytest.mark.parametrize("assets,cap", [(8, 1.0), (8, 0.25), (20, 0.15), (5, 0.35)])
+def test_the_browser_optimizer_matches_cvxpy(objective, tolerance, assets, cap):
+    """The offline build solves the same programs, without a solver library.
+
+    The browser cannot run cvxpy, so the demo implements these two objectives
+    directly: minimum variance by accelerated projected gradient, risk parity by
+    the closed-form coordinate updates of the log-barrier form. That is only
+    worth doing if the answers agree, which is what this checks.
+    """
+    returns = factor_returns(assets=assets, days=504, factors=3, seed=assets * 7 + int(cap * 100))
+    model = riskmodel.build(returns, "ledoit_wolf")
+    mandate = Mandate(max_weight=cap)
+    expected = (convex.minimum_variance(model, mandate) if objective == "minimum_variance"
+                else convex.risk_parity(model, mandate)).weights
+    actual = solve_in_browser(objective, returns, cap)
+
+    assert np.abs(actual - expected).max() < tolerance
+    assert actual.sum() == pytest.approx(1, abs=1e-9)
+    assert actual.max() <= cap + 1e-6
+    # And the portfolio it produces is as good, which is what actually matters.
+    assert model.volatility(actual) == pytest.approx(model.volatility(expected), rel=1e-6)
+
+
+@pytest.mark.skipif(NODE is None, reason="node is not installed")
+def test_the_browser_shrinkage_matches_the_python_one():
+    returns = factor_returns(assets=10, days=400, factors=3, seed=21)
+    with tempfile.TemporaryDirectory() as folder:
+        request = Path(folder) / "request.json"
+        request.write_text(json.dumps({
+            "objective": "minimum_variance", "returns": returns.tolist(),
+            "constraints": {"max_weight": 1.0, "min_weight": 0.0}, "estimator": "ledoit_wolf"}))
+        payload = json.loads(subprocess.run(
+            [NODE, str(ROOT / "tools/js_optimizer_harness.mjs"), str(request)],
+            capture_output=True, text=True, check=True, cwd=ROOT).stdout)
+    _, intensity = riskmodel.ledoit_wolf_covariance(returns)
+    assert payload["shrinkage_intensity"] == pytest.approx(intensity, rel=1e-9)
+
+
+@pytest.mark.skipif(NODE is None, reason="node is not installed")
+def test_the_browser_refuses_objectives_it_cannot_solve_exactly():
+    """Better to decline than to return a different answer under the same name."""
+    returns = factor_returns(assets=6, days=300, seed=4)
+    with tempfile.TemporaryDirectory() as folder:
+        request = Path(folder) / "request.json"
+        request.write_text(json.dumps({
+            "objective": "maximum_sharpe_convex", "returns": returns.tolist(),
+            "constraints": {"max_weight": 0.5, "min_weight": 0.0}, "estimator": "ledoit_wolf"}))
+        completed = subprocess.run(
+            [NODE, str(ROOT / "tools/js_optimizer_harness.mjs"), str(request)],
+            capture_output=True, text=True, cwd=ROOT)
+    assert completed.returncode != 0
+    assert "Python app" in completed.stderr

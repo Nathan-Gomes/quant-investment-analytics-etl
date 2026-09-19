@@ -446,17 +446,21 @@ function bindRail() {
       });
     }
   }
-  if (!backend.supportsOptimization) {
-    // Say why the options are gone rather than leaving a shorter list unexplained.
+  if (backend.objectives) {
+    // A shorter list, with the reason attached rather than left as a mystery.
     const group = $("scheme").querySelector('optgroup[label^="Re-optimized"]');
-    if (group) group.remove();
+    if (group) {
+      [...group.querySelectorAll("option")].forEach((option) => {
+        if (!backend.objectives.includes(option.value)) option.remove();
+      });
+      if (!group.querySelector("option")) group.remove();
+    }
     const note = document.createElement("p");
-    // The weighting control sits in a two-column grid, so the note has to span
-    // it; dropped in as a plain sibling it becomes a narrow second column.
     note.className = "note span2";
     note.style.margin = "-2px 0 0";
-    note.textContent = "Minimum variance, risk parity, maximum diversification and maximum Sharpe are "
-      + "solved in the Python app; this browser demo runs the fixed rules only.";
+    note.textContent = "Minimum variance and risk parity are solved in your browser and agree with the "
+      + "Python solvers within tested numerical tolerances. Maximum Sharpe, maximum diversification and the "
+      + "mandate-constrained objectives need the Python app.";
     const cell = $("scheme").closest(".span2");
     if (cell) cell.after(note);
     else ($("scheme").closest(".field") || $("scheme")).after(note);

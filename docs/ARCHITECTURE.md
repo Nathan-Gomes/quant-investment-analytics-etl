@@ -43,8 +43,9 @@ portfolio construction, scenarios and diagnostics. `provenance.py` records
 what produced the result. Interface and API share an origin in production.
 
 The offline demo is built by `tools/build_demo.py`. It bundles browser assets and
-the frozen dataset into `dist/strata-demo.html`. It cannot run Python solvers or
-download Yahoo prices. It must identify its source explicitly.
+the frozen dataset into `dist/strata-demo.html`. Browser solvers support minimum
+variance and risk parity with walk-forward rebalancing. It cannot run the other
+Python objectives or download Yahoo prices. It identifies its frozen source explicitly.
 
 The batch workflow starts at `python -m src.pipeline`. It validates inputs,
 calculates research results, loads SQLite and writes reports. It is not a

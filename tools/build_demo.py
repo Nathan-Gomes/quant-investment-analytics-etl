@@ -51,7 +51,8 @@ def build() -> Path:
     html = (STATIC / "index.html").read_text()
     css = (STATIC / "styles.css").read_text()
     scripts = [dataset_js()] + [
-        (STATIC / name).read_text() for name in ("engine.js", "charts.js", "backend-local.js", "app.js")
+        (STATIC / name).read_text() for name in
+        ("optimize.js", "engine.js", "charts.js", "backend-local.js", "app.js")
     ]
 
     html = html.replace(

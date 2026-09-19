@@ -15,6 +15,7 @@
     defaultStart: null,
     defaultEnd: null,
     supportsOptimization: true,
+    objectives: null,          // the served app offers whatever is registered
     strategies: null,
     async conformance(name) {
       const response = await fetch(endpoint(`api/conformance?strategy=${encodeURIComponent(name)}`));

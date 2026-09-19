@@ -8,11 +8,11 @@
 
 [Launch Strata](https://nathan-portfolio-lab.onrender.com/) · [Open the offline demo](https://www.nathan-gomes.com/strata-demo.html) · [Read the case study](https://www.nathan-gomes.com/Project-Investment-Analytics.dc.html)
 
-The live app supports Yahoo Finance tickers and Python optimization. The offline demo uses nine frozen securities and does not include the Python solvers. Neither places trades.
+The live app supports Yahoo Finance tickers and Python optimization. The offline demo uses nine frozen securities and runs minimum-variance and risk-parity optimization in your browser. Other optimization methods and live tickers require the Python app. Neither places trades.
 
 [![Tests](https://github.com/Nathan-Gomes/quant-investment-analytics-etl/actions/workflows/test.yml/badge.svg)](https://github.com/Nathan-Gomes/quant-investment-analytics-etl/actions/workflows/test.yml)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
-![Tests](https://img.shields.io/badge/tests-147%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-167%20passing-brightgreen)
 ![Conformance](https://img.shields.io/badge/methodologies-12%2F12%20conform-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
@@ -233,7 +233,7 @@ flowchart LR
 | Simulation precision is visible | Live results include 95% sampling intervals for estimated percentiles; these do not measure model uncertainty or guarantee future outcomes |
 
 ```
-147 tests · 12/12 methodologies conform · report, notebook and demo rebuilt on every push
+167 tests · 12/12 methodologies conform · report, notebook and demo rebuilt on every push
 ```
 
 ## Project structure

@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import random
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -34,7 +35,14 @@ CACHE_MAX_AGE_HOURS = float(os.environ.get("STRATA_CACHE_HOURS",
 # Downloads are network-bound, so they overlap rather than queue. Kept modest
 # because a provider that is being polite to us deserves the same in return.
 MAX_PARALLEL_DOWNLOADS = int(os.environ.get("STRATA_DOWNLOAD_WORKERS",
-                             os.environ.get("PORTFOLIO_LAB_DOWNLOAD_WORKERS", 8)))
+                             os.environ.get("PORTFOLIO_LAB_DOWNLOAD_WORKERS", 3)))
+RATE_LIMIT_RETRIES = 4
+RATE_LIMIT_BACKOFF = 1.5
+
+
+def _is_rate_limited(error: Exception) -> bool:
+    message = f"{type(error).__name__}: {error}".lower()
+    return any(term in message for term in ("429", "ratelimit", "rate limit", "too many requests", "throttl"))
 
 
 @dataclass
@@ -113,7 +121,14 @@ def download(ticker: str, start: str, end: str) -> tuple[pd.DataFrame, dict]:
             return cached, info
 
     handle = yf.Ticker(ticker)
-    frame = handle.history(period="max", auto_adjust=True)
+    for attempt in range(RATE_LIMIT_RETRIES):
+        try:
+            frame = handle.history(period="max", auto_adjust=True)
+            break
+        except Exception as error:
+            if not _is_rate_limited(error) or attempt == RATE_LIMIT_RETRIES - 1:
+                raise
+            time.sleep(RATE_LIMIT_BACKOFF * 2 ** attempt + random.uniform(0, 0.5))
     if frame.empty:
         raise ValueError(f"Yahoo Finance returned no price history for {ticker}. Check the symbol.")
     frame = frame[frame.Close > 0]
@@ -122,11 +137,13 @@ def download(ticker: str, start: str, end: str) -> tuple[pd.DataFrame, dict]:
         "ticker": ticker,
         "adjusted_price": frame.Close.to_numpy(),
     })
-    profile = {}
+    known = bundled_universe()
+    known = known[known.ticker == ticker]
+    profile = known.iloc[0].to_dict() if not known.empty else {}
     try:
-        raw = handle.get_info()
+        raw = profile or handle.get_info()
         profile = {
-            "name": raw.get("shortName") or raw.get("longName") or ticker,
+            "name": raw.get("name") or raw.get("shortName") or raw.get("longName") or ticker,
             "sector": raw.get("sector") or ("ETF" if raw.get("quoteType") == "ETF" else "Unclassified"),
             "currency": raw.get("currency", "").upper() or None,
             "quote_type": raw.get("quoteType"),

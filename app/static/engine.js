@@ -101,11 +101,13 @@
     return flags;
   }
 
-  function backtest(matrix, dates, target, settings, schedule) {
+  function backtest(matrix, dates, target, settings, schedule, targetProvider) {
     const assets = target.length;
     const days = dates.length;
     const flags = rebalanceMask(dates, schedule);
+    if (targetProvider) target = Float64Array.from(targetProvider(0));
     const weights = Float64Array.from(target);
+    const history = [{ index: 0, weights: Array.from(target) }];
     const nav = new Float64Array(days);
     const net = new Float64Array(days);
     const drawdown = new Float64Array(days);
@@ -127,12 +129,17 @@
         exposure[a] += weights[a];
       }
       const beforeCost = nav[i - 1] * (1 + step);
-      let traded = 0;
       const drifted = new Float64Array(assets);
       for (let a = 0; a < assets; a += 1) {
         drifted[a] = (weights[a] * (1 + returns[a])) / (1 + step);
-        if (flags[i]) traded += Math.abs(target[a] - drifted[a]);
       }
+      if (flags[i] && targetProvider) {
+        // Re-estimated from data through this close, never beyond it.
+        target = Float64Array.from(targetProvider(i));
+        history.push({ index: i, weights: Array.from(target) });
+      }
+      let traded = 0;
+      if (flags[i]) for (let a = 0; a < assets; a += 1) traded += Math.abs(target[a] - drifted[a]);
       const charge = flags[i] ? (beforeCost * traded * settings.transaction_cost_bps) / 10000 : 0;
       nav[i] = beforeCost - charge;
       net[i] = nav[i] / nav[i - 1] - 1;
@@ -151,7 +158,7 @@
     summary.rebalances = rebalances;
     summary.years = (days - 1) / TRADING_DAYS;
     return {
-      nav, net, drawdown, summary,
+      nav, net, drawdown, summary, targetHistory: history,
       finalWeights: Array.from(weights),
       averageWeights: Array.from(exposure, (v) => v / days),
       contribution: Array.from(contribution),
