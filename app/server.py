@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import json
 import logging
+import copy
+from collections import OrderedDict
 import os
 import queue
 import threading
@@ -25,7 +27,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import conformance, marketdata, strategies
+from . import conformance, marketdata, provenance, strategies
 from .analysis import ENGINE_VERSION, analyze
 from .engine import SCHEDULES, SCHEMES, Portfolio, Settings
 from .optimize import OBJECTIVES
@@ -92,6 +94,7 @@ def health() -> dict:
         "status": "ok",
         "engine_version": ENGINE_VERSION,
         "default_source": DEFAULT_SOURCE,
+        "cached_results": len(_RESULT_CACHE),
         "schedules": list(SCHEDULES),
         "schemes": list(SCHEMES),
         "objectives": sorted(strategies.REGISTRY),
@@ -109,6 +112,12 @@ def strategy_catalogue() -> dict:
 
 
 _CONFORMANCE_CACHE: dict[str, dict] = {}
+# Identical request, identical prices, identical code means identical output, so
+# the second caller gets the first caller's answer. Bounded, because a payload is
+# a couple of hundred kilobytes and this runs on a small instance.
+_RESULT_CACHE: "OrderedDict[str, dict]" = OrderedDict()
+_RESULT_CACHE_LOCK = threading.Lock()
+RESULT_CACHE_SIZE = max(0, int(_setting("RESULT_CACHE", "24")))
 
 
 @api.get("/api/conformance")
@@ -192,12 +201,41 @@ def _analyze(request: AnalysisRequest, progress=None) -> dict:
         progress({"phase": "prices", "detail": f"{len(tickers)} securities from "
                   + ("the bundled dataset" if source == "bundled" else "Yahoo Finance")})
     priceset = marketdata.load(tickers, start, end, source)
-    return analyze(
+
+    payload_request = request.model_dump(exclude_none=False)
+    key = provenance.digest({
+        "request": payload_request,
+        "window": [start, end],
+        "source": [priceset.source, priceset.note],
+        "metadata": priceset.metadata.to_json(orient="split", date_format="iso"),
+        "data": provenance.data_digest(priceset.prices)["sha256"],
+        "code": provenance.code_digest()["combined"],
+    })
+    with _RESULT_CACHE_LOCK:
+        cached = _RESULT_CACHE.get(key) if RESULT_CACHE_SIZE else None
+        if cached is not None:
+            _RESULT_CACHE.move_to_end(key)
+            cached = copy.deepcopy(cached)
+    if cached is not None:
+        cached["meta"]["result_cache_hit"] = True
+        if progress:
+            progress({"phase": "diagnostics", "detail": "identical to an earlier run; reusing it"})
+        logger.info("run %s served from cache", cached["meta"].get("run_id"))
+        return cached
+
+    payload = analyze(
         priceset.prices, portfolios, settings,
         metadata=priceset.metadata, start=start, end=end,
-        source_note=priceset.note, request=request.model_dump(exclude_none=False),
+        source_note=priceset.note, request=payload_request,
         progress=progress,
     )
+    payload["meta"]["result_cache_hit"] = False
+    with _RESULT_CACHE_LOCK:
+        if RESULT_CACHE_SIZE:
+            _RESULT_CACHE[key] = copy.deepcopy(payload)
+            while len(_RESULT_CACHE) > RESULT_CACHE_SIZE:
+                _RESULT_CACHE.popitem(last=False)
+    return payload
 
 
 @api.post("/api/analyze/stream")

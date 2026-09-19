@@ -353,19 +353,32 @@ def scenario_statistics(
     worst_drawdown = np.empty(paths)
     trough = np.empty(paths)
     banded = np.empty((paths, len(grid)))
-    chunk = max(1, int(4_000_000 / max(days, 1)))
+
+    # This stage is bound by memory traffic rather than arithmetic, so the work
+    # is done in place: one gathered array is compounded, reused as the running
+    # peak, and reused again as the drawdown, instead of allocating a 5,000 by
+    # 1,260 temporary for each step. Same numbers, in float64 throughout.
+    growth = 1.0 + net_returns
+    chunk = max(1, int(8_000_000 / max(days, 1)))
+    sampled = grid[grid > 0] - 1
     for begin in range(0, paths, chunk):
         stop = min(begin + chunk, paths)
-        sampled = net_returns[index[begin:stop]]
-        compounded = start_value * np.cumprod(1 + sampled, axis=1)
-        values = np.column_stack([np.full(stop - begin, start_value), compounded])
-        running_peak = np.maximum.accumulate(values, axis=1)
-        drawdowns = values / running_peak - 1
+        values = growth[index[begin:stop]]
+        np.cumprod(values, axis=1, out=values)
+        values *= start_value
+        peak = np.maximum.accumulate(values, axis=1)
+        np.maximum(peak, start_value, out=peak)
+        np.divide(values, peak, out=peak)          # peak now holds 1 + drawdown
         terminal[begin:stop] = values[:, -1]
-        worst_drawdown[begin:stop] = drawdowns.min(axis=1)
-        trough[begin:stop] = values.min(axis=1)
-        banded[begin:stop] = values[:, grid]
+        worst_drawdown[begin:stop] = peak.min(axis=1) - 1
+        trough[begin:stop] = np.minimum(start_value, values.min(axis=1))
+        if grid[0] == 0:
+            banded[begin:stop, 0] = start_value
+            banded[begin:stop, 1:] = values[:, sampled]
+        else:
+            banded[begin:stop] = values[:, sampled]
 
+    sorted_terminal = np.sort(terminal)
     quantiles = np.quantile(banded, [0.05, 0.25, 0.50, 0.75, 0.95], axis=0)
     tail = terminal <= np.quantile(terminal, 0.05)
     return {
@@ -388,7 +401,46 @@ def scenario_statistics(
             "median_max_drawdown": float(np.median(worst_drawdown)),
             "severe_max_drawdown_p05": float(np.quantile(worst_drawdown, 0.05)),
             "paths": int(paths),
+            # How much of each reported figure is the sample rather than the
+            # model. A percentile estimated from a finite number of paths has a
+            # confidence interval, and quoting one without it invites the reader
+            # to take the last digits seriously.
+            "sampling_error": {
+                "terminal_p05": quantile_interval(sorted_terminal, 0.05),
+                "terminal_median": quantile_interval(sorted_terminal, 0.50),
+                "terminal_p95": quantile_interval(sorted_terminal, 0.95),
+            },
         },
+    }
+
+
+def quantile_interval(sorted_values: np.ndarray, q: float, confidence: float = 0.95) -> dict:
+    """A distribution-free confidence interval for a sample quantile.
+
+    The number of observations below a quantile is binomial, so an interval can
+    be read straight off the order statistics without assuming a shape for the
+    distribution — which matters here, because the terminal values are skewed by
+    construction and a normal approximation would understate the upper tail.
+    """
+    from scipy.stats import binom
+
+    if not 0 < q < 1 or not 0 < confidence < 1:
+        raise ValueError("Quantile and confidence must be strictly between zero and one.")
+    n = len(sorted_values)
+    if n < 30:
+        return {"low": None, "high": None, "width": None}
+    alpha = 1 - confidence
+    low = int(binom.ppf(alpha / 2, n, q)) - 1
+    high = int(binom.ppf(1 - alpha / 2, n, q))
+    if low < 0 or high >= n:
+        return {"low": None, "high": None, "width": None}
+    estimate = float(np.quantile(sorted_values, q))
+    return {
+        "confidence": confidence,
+        "low": float(sorted_values[low]),
+        "high": float(sorted_values[high]),
+        # As a fraction of the estimate, which is how a reader should judge it.
+        "width": float((sorted_values[high] - sorted_values[low]) / estimate) if estimate else None,
     }
 
 

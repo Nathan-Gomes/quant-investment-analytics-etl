@@ -1,0 +1,11 @@
+# Keep published artifacts available without counting them as application source.
+output/** linguist-generated=true
+dist/** linguist-generated=true
+notebooks/*.ipynb linguist-documentation=true
+docs/** linguist-documentation=true
+# Input datasets are not source code.
+data/*.csv linguist-vendored=true
+
+* text=auto eol=lf
+*.png binary
+*.zip binary

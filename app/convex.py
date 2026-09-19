@@ -34,6 +34,8 @@ from __future__ import annotations
 
 import time
 import warnings
+from collections import OrderedDict
+from threading import RLock
 from dataclasses import dataclass, field
 
 import cvxpy as cp
@@ -180,6 +182,42 @@ class Solution:
     @property
     def optimal(self) -> bool:
         return self.status in ("optimal", "optimal_inaccurate")
+
+
+# A walk-forward backtest solves the same problem shape a hundred times with new
+# numbers. cvxpy spends most of a small solve canonicalizing, so the compiled
+# problem is kept and only its data replaced — the disciplined-parametrized-
+# program rules make that valid, and it is three times faster.
+_COMPILED: OrderedDict = OrderedDict()
+_COMPILED_LOCK = RLock()
+
+
+def _shape_key(model: RiskModel, mandate: Mandate) -> tuple | None:
+    """A signature for problems that differ only in their numbers.
+
+    Anything that changes the constraint structure between rebalances — a moving
+    previous portfolio, a tracking-error ball, a cost term — is excluded, because
+    then it is not the same problem with new data.
+    """
+    if (model.exposures is not None or mandate.turnover_budget is not None or mandate.tracking_error_limit is not None
+            or mandate.spread_bps or mandate.impact_coefficient):
+        return None
+    groups = tuple(sorted((g.name, tuple(g.members), g.minimum, g.maximum) for g in mandate.groups))
+    return (model.assets, mandate.min_weight, mandate.max_weight, mandate.long_only, groups)
+
+
+def _covariance_root(model: RiskModel) -> np.ndarray:
+    """Cᵀ where Σ = CCᵀ, so that wᵀΣw is ‖Cᵀw‖²."""
+    matrix = model.covariance
+    jitter = 1e-14 * float(np.trace(matrix)) / max(model.assets, 1)
+    for attempt in range(4):
+        try:
+            return np.linalg.cholesky(matrix + np.eye(model.assets) * jitter).T
+        except np.linalg.LinAlgError:
+            jitter = max(jitter * 100, 1e-12)
+    # Symmetric square root, for a matrix a Cholesky will not take.
+    values, vectors = np.linalg.eigh(matrix)
+    return (vectors * np.sqrt(np.clip(values, 0, None))) @ vectors.T
 
 
 def _risk_expression(model: RiskModel, weights):
@@ -367,8 +405,32 @@ def _covers_universe(mandate: Mandate, assets: int) -> bool:
 # --------------------------------------------------------------------------- #
 
 def minimum_variance(model: RiskModel, mandate: Mandate) -> Solution:
+    # Parameters and solver state are mutable: a second request must not replace
+    # them while a solve is running.
+    with _COMPILED_LOCK:
+        return _minimum_variance(model, mandate)
+
+
+def _minimum_variance(model: RiskModel, mandate: Mandate) -> Solution:
     assets = model.assets
     mandate.validate(assets)
+    key = _shape_key(model, mandate)
+    if key is not None:
+        compiled = _COMPILED.get(("minvar",) + key)
+        if compiled is None:
+            weights = cp.Variable(assets)
+            root = cp.Parameter((assets, assets))
+            constraints, named = _base_constraints(weights, mandate, assets)
+            problem = cp.Problem(cp.Minimize(cp.sum_squares(root @ weights)), constraints)
+            compiled = (problem, root, weights, named)
+            _COMPILED[("minvar",) + key] = compiled
+            while len(_COMPILED) > 24:
+                _COMPILED.popitem(last=False)
+        _COMPILED.move_to_end(("minvar",) + key)
+        problem, root, weights, named = compiled
+        root.value = _covariance_root(model)
+        return _solve(problem, weights, mandate, named, "minimum variance", assets)
+
     weights = cp.Variable(assets)
     constraints, named = _mandate_constraints(weights, mandate, model, assets)
     objective = _risk_expression(model, weights) + _cost_expression(weights, mandate)

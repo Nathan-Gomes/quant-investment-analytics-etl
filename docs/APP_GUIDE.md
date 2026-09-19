@@ -57,26 +57,34 @@ newline-delimited JSON, because the request is a POST and `EventSource` cannot
 make one. The interface shows the stage, a progress bar and a running clock, and
 falls back to the plain endpoint if the stream is unavailable.
 
-A representative run of the bake-off preset over nine securities, locally:
+The scenario stage reuses float64 arrays to reduce memory traffic. Dense
+minimum-variance problems reuse compiled solver problems when their constraint
+structure matches. Factor models retain their factor formulation. The compiled
+cache is bounded to 24 entries, and parameter assignment and solving are locked
+so concurrent requests cannot overwrite one another's inputs.
 
-| Stage | Time |
-| --- | ---: |
-| Prices and alignment | 30 ms from cache |
-| Walk-forward backtests (two optimized, two fixed) | 3.4 s |
-| Scenarios, 5,000 paths for each of four portfolios | 0.7 s |
-| Risk decomposition, frontier, weight stability | 1.4 s |
+Identical studies reuse a bounded result cache, after loading and fingerprinting
+the prices. Its key includes the resolved dates, request, prices, security
+metadata, data source and source-code digest. `STRATA_RESULT_CACHE` sets its size
+(default 24; zero disables it); `/api/health` reports `cached_results`.
+`meta.result_cache_hit` identifies reuse. Cached `meta.timings_ms` describes the
+original calculation, not the current request's latency. Downloads can still
+take time even when the analysis result is cached.
 
-Deployed on a small shared instance this is several times slower, and a free
-instance that has gone to sleep adds its cold start on top. Three things help:
+Actual speed depends on the window, strategies, paths and host. Cold starts and
+Yahoo throttling remain possible; no paid hosting changes are required by this
+update. A persistent price-cache disk requires a separate hosting decision.
 
-- **Keep the price cache.** Attach a persistent disk at `/srv/app/cache` and raise
-  `STRATA_CACHE_HOURS` (default 12). A cold cache means re-downloading
-  every ticker, which dominates everything else.
-- **Downloads already run in parallel** — `STRATA_DOWNLOAD_WORKERS`,
-  default 8. Nine tickers at a second each take about two seconds rather than
-  nine.
-- **Fewer scenario paths.** 5,000 is comfortable; 2,000 is noticeably faster and
-  moves the reported percentiles very little.
+### Sampling precision
+
+The default remains 5,000 paths. Live-server results include a 95% confidence
+interval for each estimated 5th, 50th and 95th percentile, using binomial order
+statistics rather than assuming normally distributed terminal wealth. These
+intervals measure Monte Carlo sampling error conditional on the bootstrap model,
+not the model's accuracy or uncertainty about future markets. Their width varies
+by portfolio and inputs; there is no universal percentage error at 5,000 paths.
+The offline JavaScript demo retains its existing percentile outputs without
+these additional intervals.
 
 ## What the interface shows
 

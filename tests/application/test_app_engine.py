@@ -7,6 +7,7 @@ is what lets the offline demo claim the same numbers.
 """
 
 import json
+import time
 import shutil
 import subprocess
 import sys
@@ -509,3 +510,58 @@ def test_the_payload_reports_where_the_time_went(client):
     timings = payload["meta"]["timings_ms"]
     assert {"align", "backtest", "scenarios", "diagnostics", "total"} <= set(timings)
     assert timings["total"] >= sum(v for k, v in timings.items() if k != "total") - 1
+
+
+# --------------------------------------------------------------------------- #
+# Speed, and what it buys
+# --------------------------------------------------------------------------- #
+
+def test_the_scenario_rewrite_did_not_change_the_numbers():
+    """The in-place version is an optimization, so it must be arithmetically identical."""
+    generator = np.random.default_rng(1)
+    returns = generator.normal(0.0005, 0.011, 2500)
+    index = engine.block_positions(2500, 1260, 20, 2000, 42)
+    stats = engine.scenario_statistics(returns, index, 100_000.0)
+    # Recomputed the slow, obvious way.
+    sampled = returns[index]
+    values = np.column_stack([np.full(2000, 100_000.0), 100_000.0 * np.cumprod(1 + sampled, axis=1)])
+    peak = np.maximum.accumulate(values, axis=1)
+    assert stats["summary"]["terminal_median"] == pytest.approx(np.median(values[:, -1]))
+    assert stats["summary"]["median_max_drawdown"] == pytest.approx(np.median((values / peak - 1).min(axis=1)))
+    assert stats["bands"]["median"][0] == pytest.approx(100_000.0)
+
+
+@pytest.mark.parametrize("q", [0.05, 0.5, 0.95])
+def test_a_quoted_percentile_comes_with_its_sampling_error(q):
+    generator = np.random.default_rng(3)
+    values = np.sort(generator.lognormal(11.5, 0.6, 5000))
+    band = engine.quantile_interval(values, q)
+    estimate = float(np.quantile(values, q))
+    assert band["low"] <= estimate <= band["high"]
+    assert 0 < band["width"] < 0.3
+
+
+def test_the_interval_narrows_as_paths_are_added():
+    """The whole justification for a large path count, stated as a test."""
+    generator = np.random.default_rng(3)
+    widths = []
+    for paths in (1000, 5000, 20000):
+        values = np.sort(generator.lognormal(11.5, 0.6, paths))
+        widths.append(engine.quantile_interval(values, 0.5)["width"])
+    assert widths[0] > widths[1] > widths[2]
+
+
+def test_an_identical_request_is_served_from_the_cache(client):
+    from app import server
+
+    server._RESULT_CACHE.clear()
+    first = client.post("/api/analyze", json=BAKE_OFF).json()
+    started = time.perf_counter()
+    second = client.post("/api/analyze", json=BAKE_OFF).json()
+    elapsed = time.perf_counter() - started
+    assert first["meta"]["run_id"] == second["meta"]["run_id"]
+    assert first["portfolios"][0]["scenario"]["summary"] == second["portfolios"][0]["scenario"]["summary"]
+    assert elapsed < 0.2          # returned, not recomputed
+    # A different request must not collide with it.
+    changed = client.post("/api/analyze", json={**BAKE_OFF, "seed": 99}).json()
+    assert changed["meta"]["run_id"] != first["meta"]["run_id"]

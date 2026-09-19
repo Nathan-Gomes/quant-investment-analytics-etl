@@ -12,7 +12,7 @@ The live app supports Yahoo Finance tickers and Python optimization. The offline
 
 [![Tests](https://github.com/Nathan-Gomes/quant-investment-analytics-etl/actions/workflows/test.yml/badge.svg)](https://github.com/Nathan-Gomes/quant-investment-analytics-etl/actions/workflows/test.yml)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
-![Tests](https://img.shields.io/badge/tests-134%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-147%20passing-brightgreen)
 ![Conformance](https://img.shields.io/badge/methodologies-12%2F12%20conform-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
@@ -230,9 +230,10 @@ flowchart LR
 | A methodology is safe to run | A 15-check conformance battery in CI, with tests that prove it fails bad methodologies |
 | A result can be traced | Every response carries a run identifier derived from the request, a digest of the price values used, a digest of the source, and the library versions — the same study on the same data always carries the same identifier |
 | A study can be shared | The whole setup encodes into the link, so a colleague opens the identical study rather than a description of one |
+| Simulation precision is visible | Live results include 95% sampling intervals for estimated percentiles; these do not measure model uncertainty or guarantee future outcomes |
 
 ```
-134 tests · 12/12 methodologies conform · report, notebook and demo rebuilt on every push
+147 tests · 12/12 methodologies conform · report, notebook and demo rebuilt on every push
 ```
 
 ## Project structure
