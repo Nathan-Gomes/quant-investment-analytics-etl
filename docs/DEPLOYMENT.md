@@ -101,7 +101,8 @@ undo by accident later.
    point of the project.
 4. **Never substitute simulated data for a failed download.** A failure is
    reported and names the ticker. Silent fallbacks are how a demo becomes a lie —
-   the ones that are unavoidable are logged and surfaced in `meta.degradations`.
+   the ones that are unavoidable are logged and surfaced in `meta.degradations`
+   (see [`OBSERVABILITY.md`](OBSERVABILITY.md)).
 5. **Keep the assumptions plate and the disclaimers** — survivorship bias, no FX,
    no taxes, not investment advice. They live in `app/static/app.js` and
    [`APP_GUIDE.md`](APP_GUIDE.md).

@@ -31,3 +31,12 @@ CREATE VIEW rolling_portfolio_returns AS
 SELECT date, portfolio_id,
  nav / LAG(nav, 20) OVER (PARTITION BY portfolio_id ORDER BY date) - 1 AS return_20_sessions
 FROM portfolio_daily_summary;
+
+-- Every run this mart has seen, successes and failures alike, most recent first.
+-- The question behind this view is "what went wrong, and when", so a failed run
+-- has to appear here with the stage it died at rather than be missing entirely.
+CREATE VIEW run_history AS
+SELECT run_id, timestamp, status, stage, source, price_rows,
+       ROUND(duration_seconds, 2) AS duration_seconds, error_type, error
+FROM pipeline_runs
+ORDER BY timestamp DESC;

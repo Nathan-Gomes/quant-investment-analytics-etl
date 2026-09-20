@@ -18,6 +18,8 @@ import os
 import queue
 import threading
 import time
+import uuid
+from logging.handlers import RotatingFileHandler
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -27,7 +29,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import conformance, marketdata, provenance, strategies
+from . import conformance, marketdata, observability, provenance, strategies
 from .analysis import ENGINE_VERSION, analyze
 from .engine import SCHEDULES, SCHEMES, Portfolio, Settings
 from .optimize import OBJECTIVES
@@ -195,6 +197,9 @@ def _prepare(request: AnalysisRequest):
 
 
 def _analyze(request: AnalysisRequest, progress=None) -> dict:
+    # Begin before the provider is touched: a substituted profile is a
+    # degradation of this request and belongs on this request's payload.
+    observability.start()
     tickers, start, end, settings, portfolios = _prepare(request)
     source = request.source or DEFAULT_SOURCE
     if progress:
@@ -255,16 +260,21 @@ def run_analysis_stream(request: AnalysisRequest) -> StreamingResponse:
 
     def worker() -> None:
         started = time.perf_counter()
+        # A failed run has no run_id to quote, so the reference is minted up
+        # front: whatever the user reports back, it points at a log line.
+        reference = uuid.uuid4().hex[:12]
         try:
             payload = _analyze(request, progress=events.put)
-            logger.info("run %s finished in %.0f ms: %s", payload["meta"].get("run_id"),
-                        (time.perf_counter() - started) * 1000, payload["meta"]["timings_ms"])
+            logger.info("run %s (ref %s) finished in %.0f ms: %s", payload["meta"].get("run_id"),
+                        reference, (time.perf_counter() - started) * 1000, payload["meta"]["timings_ms"])
             events.put({"phase": "done", "payload": payload})
         except ValueError as error:
-            events.put({"phase": "error", "message": str(error)})
+            logger.info("run ref %s rejected: %s", reference, error)
+            events.put({"phase": "error", "message": str(error), "reference": reference})
         except Exception as error:  # noqa: BLE001
-            logger.exception("Analysis failed")
-            events.put({"phase": "error", "message": f"The analysis did not finish: {error}"})
+            logger.exception("Analysis failed (ref %s)", reference)
+            events.put({"phase": "error", "reference": reference,
+                        "message": f"The analysis did not finish (reference {reference}): {error}"})
         finally:
             events.put(None)
 
@@ -284,13 +294,15 @@ def run_analysis_stream(request: AnalysisRequest) -> StreamingResponse:
 
 @api.post("/api/analyze")
 def run_analysis(request: AnalysisRequest) -> JSONResponse:
+    reference = uuid.uuid4().hex[:12]
     try:
         payload = _analyze(request)
     except ValueError as error:
+        logger.info("run ref %s rejected: %s", reference, error)
         raise HTTPException(400, str(error)) from error
     except Exception as error:  # noqa: BLE001
-        logger.exception("Analysis failed")
-        raise HTTPException(500, f"The analysis did not finish: {error}") from error
+        logger.exception("Analysis failed (ref %s)", reference)
+        raise HTTPException(500, f"The analysis did not finish (reference {reference}): {error}") from error
     return JSONResponse(payload)
 
 
@@ -305,7 +317,17 @@ api.mount("/", StaticFiles(directory=STATIC), name="static")
 def main() -> None:
     import uvicorn
 
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    handlers: list[logging.Handler] = [logging.StreamHandler()]
+    # Containers want stdout, so a file is opt-in; when it is asked for it
+    # rotates, because an unbounded log is one disk-full away from losing the
+    # incident it was kept for.
+    log_file = _setting("LOG_FILE", "")
+    if log_file:
+        path = Path(log_file)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        handlers.append(RotatingFileHandler(path, maxBytes=5_000_000, backupCount=5, encoding="utf-8"))
+    logging.basicConfig(level=logging.INFO, handlers=handlers,
+                        format="%(asctime)s %(levelname)-8s %(name)s: %(message)s")
     uvicorn.run("app.server:api", host=os.environ.get("HOST", "127.0.0.1"),
                 port=int(os.environ.get("PORT", 8000)), reload=False)
 
