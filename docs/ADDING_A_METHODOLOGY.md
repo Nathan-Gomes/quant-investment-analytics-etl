@@ -1,8 +1,8 @@
 # Adding a methodology
 
-This describes the path a construction rule takes from a researcher's notebook
-to something that can run unattended. It is the workflow the rest of the app is
-built around, and the reason the code is shaped the way it is.
+The path a construction rule takes from a rough idea in a notebook to something
+that can run unattended. It's the workflow the rest of the app is built around,
+and the reason the code is shaped the way it is.
 
 ## The contract
 
@@ -52,10 +52,10 @@ those is asking for something the live system would not have at that moment, and
 that is the conversation to have before the code is written rather than after
 the backtest looks good.
 
-### The mandate is not yours to set
+### The mandate isn't set here
 
-`mandate()` gives you the limits the desk already runs under: position bounds,
-sector and country limits, a turnover budget. They apply to whatever you build.
+`mandate()` supplies the limits everything already runs under: position bounds,
+sector and country limits, a turnover budget. They apply to whatever gets built.
 
 What it deliberately does **not** give you is a tracking-error ceiling or a cost
 term, because those change what is being optimized rather than constraining it.

@@ -39,7 +39,7 @@ Forecasts do not alter holdings. Overlapping targets make errors dependent; this
 
 ## SQL and validation
 
-The mart contains security analytics, position facts, daily NAV, sector exposures, research holdings, target weights, model outputs and run history. `sql/analysis_queries.sql` demonstrates joins, CTEs, aggregations, `LAG`, `ROW_NUMBER` and `DENSE_RANK`. Monthly returns exclude the first partial month when no preceding month-end exists.
+The mart contains security analytics, position facts, daily NAV, sector exposures, research holdings, target weights, model outputs and run history. `sql/analysis_queries.sql` uses joins, CTEs, aggregations, `LAG`, `ROW_NUMBER` and `DENSE_RANK`. Monthly returns exclude the first partial month when no preceding month-end exists.
 
 Validation rejects nonpositive/nonfinite prices, missing prices, conflicting duplicates, unknown holdings and weights that fail to sum to one. Exact duplicates are removed and counted. Position values and weights reconcile to NAV. Tests exercise hand-calculated compounding, initial losses, fees, lagged weights, future-data invariance, forward label construction and failed database publication. CI tests and executes a synthetic smoke run without depending on a market API.
 

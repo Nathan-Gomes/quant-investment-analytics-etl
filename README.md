@@ -257,7 +257,7 @@ tests/
   research/     Research calculations, validation and reporting tests
 scripts/     Research reporting and notebook utilities
 tools/       Single-file demo build, cross-language test harness
-docs/        Review guide, app guide, methodology guide, handoff brief
+docs/        Research tour, app guide, methodology guide, deployment notes
 notebooks/   Executed research notebook
 output/      Published research evidence (not live application state)
 .github/     Automated validation and artifact builds
@@ -266,17 +266,17 @@ Makefile     Standard development commands: make run, make check, make demo
 
 ## Limits
 
-Stated here because they are the first thing a reviewer should ask about.
+Things this doesn't handle well, noted so I don't lose track of them.
 
-- **Survivorship and selection bias.** The universe was chosen today, knowing which names survived and did well. That flatters any backtest, and nothing here corrects for it.
-- **The scenario fan is not a forecast.** It resamples one window's distribution and assumes the future is drawn from the same one.
-- **No FX.** Mixing currencies measures each in its own; the app warns rather than converting.
-- **Not modelled:** taxes, inflation, cash dividends, delistings, market impact beyond a fixed spread, spreads that widen in stress.
-- **A constant risk-free rate** across a decade is an assumption, and Sharpe is sensitive to it.
-- **The risk model is statistical, not fundamental.** Its factors have no economic names, so there is no value or momentum exposure to report.
-- **Estimation error dominates.** With a handful of assets and a few years of daily data, the differences between candidate portfolios are frequently smaller than the error in the inputs that produced them.
+- **Survivorship and selection bias.** I picked the universe today, already knowing which names survived and did well. That tends to flatter a backtest, and nothing here corrects for it.
+- **The scenario fan isn't a forecast.** It resamples one window's distribution and assumes the future looks something like it.
+- **No FX.** Mixing currencies measures each in its own; the app warns instead of converting.
+- **Not modelled:** taxes, inflation, cash dividends, delistings, market impact beyond a fixed spread, or spreads widening in stress.
+- **A constant risk-free rate** across a decade is a simplification, and Sharpe is fairly sensitive to it.
+- **The risk model is statistical, not fundamental.** Its factors don't have economic names, so there's no value or momentum exposure to report.
+- **Estimation error is often large.** With a handful of assets and a few years of daily data, the gaps between candidate portfolios can be smaller than the error in the inputs behind them.
 
-This is research tooling for studying historical data under stated assumptions. It is not investment advice, and no output is a recommendation to buy or sell anything. Market data access remains subject to the provider's terms.
+I built this to study historical data under assumptions I've tried to spell out. It isn't investment advice, and nothing it produces is a recommendation to buy or sell. Market data use is still subject to the provider's terms.
 
 ## References
 
@@ -289,9 +289,9 @@ This is research tooling for studying historical data under stated assumptions. 
 
 | Document | For |
 | --- | --- |
-| [`docs/REVIEW_GUIDE.md`](docs/REVIEW_GUIDE.md) | Reading the research in fifteen minutes |
+| [`docs/REVIEW_GUIDE.md`](docs/REVIEW_GUIDE.md) | A short tour of the research, start to finish |
 | [`docs/APP_GUIDE.md`](docs/APP_GUIDE.md) | Running the bench, the API, and its limits |
 | [`docs/OPTIMIZATION.md`](docs/OPTIMIZATION.md) | Convex formulations, risk models, mandates, and the gaps |
 | [`docs/ADDING_A_METHODOLOGY.md`](docs/ADDING_A_METHODOLOGY.md) | The contract, the gate, and a worked example |
-| [`docs/HANDOFF.md`](docs/HANDOFF.md) | Deploying it |
+| [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Deploying it, and what tends to break |
 | [`docs/README_pipeline_detail.md`](docs/README_pipeline_detail.md) | Portfolio definitions, conventions, SQL mart, validation rules |
