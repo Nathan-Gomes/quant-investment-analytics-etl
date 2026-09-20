@@ -259,7 +259,7 @@ tests/
   research/     Research calculations, validation and reporting tests
 scripts/     Research reporting and notebook utilities
 tools/       Single-file demo build, cross-language test harness
-docs/        Research tour, app guide, methodology guide, deployment notes
+docs/        Research tour, app guide, methodology guide, observability notes
 notebooks/   Executed research notebook
 output/      Published research evidence (not live application state)
 .github/     Automated validation and artifact builds
@@ -296,5 +296,4 @@ I built this to study historical data under assumptions I've tried to spell out.
 | [`docs/OPTIMIZATION.md`](docs/OPTIMIZATION.md) | Convex formulations, risk models, mandates, and the gaps |
 | [`docs/ADDING_A_METHODOLOGY.md`](docs/ADDING_A_METHODOLOGY.md) | The contract, the gate, and a worked example |
 | [`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md) | Run records, log correlation, and the fallbacks that announce themselves |
-| [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Deploying it, and what tends to break |
 | [`docs/README_pipeline_detail.md`](docs/README_pipeline_detail.md) | Portfolio definitions, conventions, SQL mart, validation rules |
