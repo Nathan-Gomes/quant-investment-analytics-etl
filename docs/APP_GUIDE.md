@@ -241,9 +241,9 @@ final value, which answers a wealth question instead). Errors come back as HTTP
 400 with a sentence explaining what to change.
 
 Every number the interface draws is in the response, and **Export results**
-downloads it, so a reviewer can check a chart against the payload.
+downloads it, so any chart can be checked against the payload behind it.
 
-## Limits worth stating to anyone you show this to
+## Limits worth keeping in mind
 
 - **Survivorship and selection bias.** Tickers are chosen today, knowing which
   ones survived and did well. That flatters any backtest and nothing here

@@ -9,10 +9,10 @@ and what it still does not do.
 **Mandate** — what the portfolio is allowed to be. `app/convex.py`.
 **Objective** — what it optimizes for. `app/strategies.py`.
 
-They are separate because they belong to different people. A researcher supplies
-an objective. The desk owns the mandate, and every objective inherits it without
-knowing it exists. The risk model is a research choice that both depend on and
-neither should hard-code.
+They are separate because they change for different reasons. An objective is the
+part worth experimenting with; the mandate is the set of limits every objective
+should inherit without having to know about them. The risk model is a choice both
+depend on and neither should hard-code.
 
 ## Risk models
 
