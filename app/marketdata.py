@@ -26,6 +26,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from . import observability
+
 ROOT = Path(__file__).resolve().parents[1]
 CACHE = ROOT / "app" / "cache"
 BUNDLED_PRICES = ROOT / "data" / "cached_prices.csv"
@@ -109,7 +111,10 @@ def _known_profile(ticker: str) -> dict | None:
     """The security master, for tickers whose name and sector are already on file."""
     try:
         master = bundled_universe()
-    except Exception:  # noqa: BLE001
+    except Exception as error:  # noqa: BLE001
+        observability.record("security_master_unavailable",
+                             f"{ticker}: bundled security master unreadable ({error}); "
+                             "issuer name and sector fall back to the provider")
         return None
     row = master[master.ticker == ticker]
     if row.empty:
@@ -195,7 +200,10 @@ def download(ticker: str, start: str, end: str) -> tuple[pd.DataFrame, dict]:
         }
     except StopIteration:
         pass
-    except Exception:  # a missing profile must not fail a valid price series
+    except Exception as error:  # a missing profile must not fail a valid price series
+        observability.record("profile_unavailable",
+                             f"{ticker}: no issuer profile from the provider ({error}); "
+                             "sector recorded as Unclassified, which affects sector exposure")
         profile = {"name": ticker, "sector": "Unclassified", "currency": None, "quote_type": None}
     info = {
         **profile,

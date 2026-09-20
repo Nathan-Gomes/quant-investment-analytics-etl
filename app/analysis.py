@@ -15,7 +15,7 @@ from time import perf_counter
 import numpy as np
 import pandas as pd
 
-from . import engine, optimize, provenance, riskmodel, strategies
+from . import engine, observability, optimize, provenance, riskmodel, strategies
 from .engine import Portfolio, Settings
 
 ENGINE_VERSION = "1.0.0"
@@ -350,6 +350,9 @@ def analyze(
             "calibration_days": int(warmup),
             "timings_ms": {**timings, "total": round((perf_counter() - started) * 1000, 1)},
             "benchmark": benchmark_name,
+            # Fallbacks taken during this run. Empty is the normal case and the
+            # one worth being able to prove.
+            "degradations": observability.drain(),
             "settings": {
                 "initial_capital": settings.initial_capital,
                 "transaction_cost_bps": settings.transaction_cost_bps,
@@ -455,7 +458,10 @@ def _weight_stability(state: dict) -> dict | None:
         from .conformance import weight_stability
 
         measured = weight_stability(strategy, context.returns, context.constraints, draws=20)
-    except Exception:  # noqa: BLE001 - diagnostics must never sink an analysis
+    except Exception as error:  # noqa: BLE001 - diagnostics must never sink an analysis
+        observability.record("diagnostics_unavailable",
+                             f"weight stability not computed ({error}); "
+                             "the analysis is unaffected, the diagnostic is missing")
         return None
     if not measured.get("percentiles"):
         return None

@@ -41,6 +41,7 @@ from dataclasses import dataclass, field
 import cvxpy as cp
 import numpy as np
 
+from . import observability
 from .riskmodel import RiskModel
 
 SOLVERS = ("CLARABEL", "OSQP", "SCS")
@@ -308,6 +309,8 @@ def _solve(problem: cp.Problem, weights, mandate: Mandate, named: dict,
             problem.solve(solver=solver, **_tolerances(solver))
         except (cp.error.SolverError, cp.error.DCPError, Exception) as error:  # noqa: BLE001
             last_error = error
+            observability.record("solver_failed",
+                                 f"{label}: {solver} failed ({error}); trying the next solver")
             continue
         if problem.status == "optimal":
             break
@@ -577,7 +580,9 @@ def risk_parity(model: RiskModel, mandate: Mandate, budget: np.ndarray | None = 
             problem.solve(solver=solver, **_tolerances(solver, tight=True))
             if problem.status in ("optimal", "optimal_inaccurate"):
                 break
-        except Exception:  # noqa: BLE001
+        except Exception as error:  # noqa: BLE001
+            observability.record("solver_failed",
+                                 f"risk parity: {solver} failed ({error}); trying the next solver")
             continue
     elapsed = time.perf_counter() - started
     if problem.status not in ("optimal", "optimal_inaccurate"):

@@ -10,11 +10,12 @@ from pathlib import Path
 
 import pandas as pd
 
+from . import observability
 from .analytics import portfolio_analytics, security_analytics
 from .extract import extract
 from .forward import forward_scenarios
 from .scenario_risk import risk_review
-from .load import load_mart
+from .load import load_mart, record_run
 from .models import fit_models
 from .report import render_report
 from .validation import clean_inputs, validate_outputs
@@ -25,56 +26,88 @@ def run(root, source="cached", config_path=None):
     started = time.perf_counter()
     output = root / "output"
     output.mkdir(exist_ok=True)
-    config = json.loads((config_path or root / "config.json").read_text())
-    if not (0 < config["test_fraction"] < 0.5 and config["forecast_days"] >= 2
-            and config["initial_capital"] > 0 and config["transaction_cost_bps"] >= 0
-            and config["risk_free_rate"] > -1 and config["warmup_days"] >= 20
-            and config["simulation_years"] >= 1 and config["simulation_paths"] >= 100
-            and config["bootstrap_block_days"] >= 1 and config["trading_days"] >= 1):
-        raise ValueError("Invalid research configuration")
     run_id = str(uuid.uuid4())
-    logging.info("[1/9] Extracting prices, holdings and security metadata")
-    prices, holdings, securities, provenance = extract(root, config, source)
-    prices = prices[(pd.to_datetime(prices.date) >= config["start"]) & (pd.to_datetime(prices.date) < config["end"])]
-    logging.info("[2/9] Cleaning and validating inputs")
-    prices, quality = clean_inputs(prices, holdings, securities)
-    logging.info("[3/9] Calculating security analytics")
-    security = security_analytics(prices)
-    logging.info("[4/9] Simulating portfolios and transaction costs")
-    daily, positions, sectors, summary, trades, targets = portfolio_analytics(prices, holdings, securities, config)
-    logging.info("[5/9] Validating NAV and allocation reconciliation")
-    validate_outputs(daily, positions)
-    logging.info("[6/9] Training models with purged time-series validation")
-    scores, predictions, coefficients, audits = fit_models(daily, prices, config)
-    logging.info("[7/9] Simulating five-year portfolio scenarios from completed history")
-    # Scenarios start after the historical backtest and never alter its decisions.
-    projection_bands, projection_summary = forward_scenarios(daily, config)
-    downside, sensitivity, paired = risk_review(daily, config)
-    tables = {"securities": securities, "holdings": holdings, "security_daily_analytics": security,
-              "portfolio_positions": positions, "portfolio_daily_summary": daily,
-              "sector_exposures": sectors, "portfolio_summary": summary, "rebalancing_history": trades,
-              "target_weights": targets, "model_scores": scores, "model_predictions": predictions,
-              "model_coefficients": coefficients, "validation_splits": audits,
-              "forward_projection_bands": projection_bands, "forward_projection_summary": projection_summary,
-              "scenario_downside": downside, "scenario_sensitivity": sensitivity, "scenario_paired": paired}
-    logging.info("[8/9] Generating offline report and CSV exports")
-    charts = render_report(output, tables, provenance, config, quality)
-    for name, frame in tables.items():
-        frame.to_csv(output / f"{name}.csv", index=False)
-    manifest = {"run_id": run_id, "timestamp": datetime.now(timezone.utc).isoformat(),
-                "source": provenance, "config": config, "validation": quality,
-                "package_versions": {package: version(package) for package in ("pandas", "numpy", "scipy", "scikit-learn", "plotly", "yfinance")},
-                "source_hashes": {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in (root / "src").glob("*.py")},
-                "input_hashes": {name: hashlib.sha256((root / "data" / name).read_bytes()).hexdigest()
-                                 for name in ("holdings.csv", "securities.csv")}}
-    (output / "run_manifest.json").write_text(json.dumps(manifest, indent=2))
-    tables["pipeline_runs"] = pd.DataFrame([{"run_id": run_id, "timestamp": manifest["timestamp"],
-                                            "status": "success", "price_rows": len(prices),
-                                            "source": provenance["source"], "manifest": json.dumps(manifest)}])
-    logging.info("[9/9] Loading SQL data mart")
-    load_mart(output, tables, (root / "sql/analysis_queries.sql").read_text())
-    logging.info("Pipeline complete: %s prices; %.1f seconds; report: %s", len(prices), time.perf_counter() - started, output / "report.html")
-    return tables, charts
+    observability.set_run_id(run_id)
+    timestamp = datetime.now(timezone.utc).isoformat()
+    # The stage is carried alongside the work so that a failure can say where it
+    # happened. A traceback names a function; this names the step an analyst
+    # would recognise, which is what the question "what went wrong" is asking.
+    stage = "configuration"
+    try:
+        config = json.loads((config_path or root / "config.json").read_text())
+        if not (0 < config["test_fraction"] < 0.5 and config["forecast_days"] >= 2
+                and config["initial_capital"] > 0 and config["transaction_cost_bps"] >= 0
+                and config["risk_free_rate"] > -1 and config["warmup_days"] >= 20
+                and config["simulation_years"] >= 1 and config["simulation_paths"] >= 100
+                and config["bootstrap_block_days"] >= 1 and config["trading_days"] >= 1):
+            raise ValueError("Invalid research configuration")
+        stage = "extract"
+        logging.info("[1/9] Extracting prices, holdings and security metadata")
+        prices, holdings, securities, provenance = extract(root, config, source)
+        prices = prices[(pd.to_datetime(prices.date) >= config["start"]) & (pd.to_datetime(prices.date) < config["end"])]
+        stage = "clean_inputs"
+        logging.info("[2/9] Cleaning and validating inputs")
+        prices, quality = clean_inputs(prices, holdings, securities)
+        stage = "security_analytics"
+        logging.info("[3/9] Calculating security analytics")
+        security = security_analytics(prices)
+        stage = "portfolio_analytics"
+        logging.info("[4/9] Simulating portfolios and transaction costs")
+        daily, positions, sectors, summary, trades, targets = portfolio_analytics(prices, holdings, securities, config)
+        stage = "validate_outputs"
+        logging.info("[5/9] Validating NAV and allocation reconciliation")
+        validate_outputs(daily, positions)
+        stage = "fit_models"
+        logging.info("[6/9] Training models with purged time-series validation")
+        scores, predictions, coefficients, audits = fit_models(daily, prices, config)
+        stage = "forward_scenarios"
+        logging.info("[7/9] Simulating five-year portfolio scenarios from completed history")
+        # Scenarios start after the historical backtest and never alter its decisions.
+        projection_bands, projection_summary = forward_scenarios(daily, config)
+        downside, sensitivity, paired = risk_review(daily, config)
+        tables = {"securities": securities, "holdings": holdings, "security_daily_analytics": security,
+                  "portfolio_positions": positions, "portfolio_daily_summary": daily,
+                  "sector_exposures": sectors, "portfolio_summary": summary, "rebalancing_history": trades,
+                  "target_weights": targets, "model_scores": scores, "model_predictions": predictions,
+                  "model_coefficients": coefficients, "validation_splits": audits,
+                  "forward_projection_bands": projection_bands, "forward_projection_summary": projection_summary,
+                  "scenario_downside": downside, "scenario_sensitivity": sensitivity, "scenario_paired": paired}
+        stage = "render_report"
+        logging.info("[8/9] Generating offline report and CSV exports")
+        charts = render_report(output, tables, provenance, config, quality)
+        for name, frame in tables.items():
+            frame.to_csv(output / f"{name}.csv", index=False)
+        manifest = {"run_id": run_id, "timestamp": timestamp,
+                    "source": provenance, "config": config, "validation": quality,
+                    "package_versions": {package: version(package) for package in ("pandas", "numpy", "scipy", "scikit-learn", "plotly", "yfinance")},
+                    "source_hashes": {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in (root / "src").glob("*.py")},
+                    "input_hashes": {name: hashlib.sha256((root / "data" / name).read_bytes()).hexdigest()
+                                     for name in ("holdings.csv", "securities.csv")}}
+        (output / "run_manifest.json").write_text(json.dumps(manifest, indent=2))
+        tables["pipeline_runs"] = pd.DataFrame([{"run_id": run_id, "timestamp": timestamp,
+                                                "status": "success", "stage": "complete",
+                                                "price_rows": len(prices), "source": provenance["source"],
+                                                "duration_seconds": round(time.perf_counter() - started, 3),
+                                                "error_type": None, "error": None,
+                                                "manifest": json.dumps(manifest)}])
+        stage = "load_mart"
+        logging.info("[9/9] Loading SQL data mart")
+        load_mart(output, tables, (root / "sql/analysis_queries.sql").read_text())
+        logging.info("Pipeline complete: %s prices; %.1f seconds; report: %s", len(prices), time.perf_counter() - started, output / "report.html")
+        return tables, charts
+    except Exception as error:
+        logging.exception("Pipeline failed during %s", stage)
+        # Recording the failure must not replace it: if the mart itself is what
+        # broke, the original exception is still the one worth propagating.
+        try:
+            record_run(output, {"run_id": run_id, "timestamp": timestamp, "status": "failed",
+                                "stage": stage, "price_rows": None, "source": source,
+                                "duration_seconds": round(time.perf_counter() - started, 3),
+                                "error_type": type(error).__name__, "error": str(error),
+                                "manifest": None})
+        except Exception:  # noqa: BLE001
+            logging.exception("Could not record the failed run in the data mart")
+        raise
 
 
 def main():
@@ -84,13 +117,8 @@ def main():
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     (root / "output").mkdir(exist_ok=True)
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s",
-                        handlers=[logging.StreamHandler(), logging.FileHandler(root / "output/pipeline.log")])
-    try:
-        run(root, args.source, args.config)
-    except Exception:
-        logging.exception("Pipeline failed")
-        raise
+    observability.configure(root / "output/pipeline.log")
+    run(root, args.source, args.config)
 
 
 if __name__ == "__main__":

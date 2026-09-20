@@ -232,9 +232,11 @@ flowchart LR
 | A study can be shared | The whole setup encodes into the link, so a colleague opens the identical study rather than a description of one |
 | Simulation precision is visible | Live results include 95% sampling intervals for estimated percentiles; these do not measure model uncertainty or guarantee future outcomes |
 | Three implementations agree | Minimum variance and risk parity are solved by cvxpy in Python, by projected gradient and coordinate descent in the browser, and independently in MATLAB. Tests compare all three; CI runs the MATLAB one under Octave |
+| A failure can be investigated | Every run appends to `pipeline_runs` whether it succeeds or fails, carrying the stage it reached and the exception that stopped it; the `run_history` view reads back both |
+| A fallback cannot happen silently | Each substitution — a missing issuer profile, a solver that declined, a diagnostic that could not be computed — is logged and returned in `meta.degradations`, so a run that finished can still be asked what it worked around |
 
 ```
-168 tests · 12/12 methodologies conform · report, notebook and demo rebuilt on every push
+178 tests · 12/12 methodologies conform · report, notebook and demo rebuilt on every push
 ```
 
 ## Project structure
@@ -293,5 +295,6 @@ I built this to study historical data under assumptions I've tried to spell out.
 | [`docs/APP_GUIDE.md`](docs/APP_GUIDE.md) | Running the bench, the API, and its limits |
 | [`docs/OPTIMIZATION.md`](docs/OPTIMIZATION.md) | Convex formulations, risk models, mandates, and the gaps |
 | [`docs/ADDING_A_METHODOLOGY.md`](docs/ADDING_A_METHODOLOGY.md) | The contract, the gate, and a worked example |
+| [`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md) | Run records, log correlation, and the fallbacks that announce themselves |
 | [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Deploying it, and what tends to break |
 | [`docs/README_pipeline_detail.md`](docs/README_pipeline_detail.md) | Portfolio definitions, conventions, SQL mart, validation rules |
