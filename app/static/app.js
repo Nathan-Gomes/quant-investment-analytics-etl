@@ -77,6 +77,7 @@ const state = {
   selected: null,
   log: false,
   renderers: [],
+  view: "overview",
 };
 
 const $ = (id) => document.getElementById(id);
@@ -398,7 +399,13 @@ function bindRail() {
   // it carries the keyboard affordances a button would.
   document.querySelectorAll(".card > header").forEach((header) => {
     const card = header.parentElement;
-    const toggle = () => card.setAttribute("data-open", card.getAttribute("data-open") === "false" ? "true" : "false");
+    const sync = () => header.setAttribute("aria-expanded", String(card.getAttribute("data-open") !== "false"));
+    const toggle = () => {
+      card.setAttribute("data-open", card.getAttribute("data-open") === "false" ? "true" : "false");
+      sync();
+    };
+    header.setAttribute("role", "button");
+    sync();
     header.tabIndex = 0;
     header.setAttribute("role", "button");
     header.onclick = toggle;
@@ -417,11 +424,16 @@ function bindRail() {
       && window.matchMedia("(prefers-color-scheme: dark)").matches;
     const dark = document.documentElement.getAttribute("data-theme") === "dark"
       || (!document.documentElement.getAttribute("data-theme") && prefersDark);
-    document.documentElement.setAttribute("data-theme", dark ? "light" : "dark");
-    $("theme-toggle").textContent = dark ? "Dark" : "Light";
+    const next = dark ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", next);
+    try { localStorage.setItem("strata.theme", next); } catch (error) { /* private mode */ }
+    $("theme-toggle").setAttribute("aria-label", `Switch to ${dark ? "dark" : "light"} theme`);
     rerender();
   };
-  $("share-setup").onclick = shareSetup;
+  $("copy-link").onclick = shareSetup;
+  document.querySelectorAll("#views button").forEach((button) => {
+    button.onclick = () => showView(button.dataset.view);
+  });
   $("export-json").onclick = () => {
     if (!state.result) return;
     const blob = new Blob([JSON.stringify(state.result, null, 2)], { type: "application/json" });
@@ -644,11 +656,73 @@ function revealResults() {
   results.scrollIntoView({ behavior: still ? "auto" : "smooth", block: "start" });
 }
 
+/* Results are grouped by the question they answer, one view at a time, so the
+   page reads like an application rather than a report to scroll. */
+const VIEWS = {
+  overview: (result) => [kpiStrip(result), heroPlate(result), metricsPlate(result)],
+  risk: (result) => [drawdownPlate(result)],
+  scenarios: (result) => [scenarioPlate(result)],
+  construction: (result) => [optimizationPlate(result), compositionPlate(result)],
+  assumptions: (result) => [assumptionsPlate(result)],
+};
+
+function showView(view) {
+  if (!VIEWS[view]) return;
+  state.view = view;
+  try { sessionStorage.setItem("strata.view", view); } catch (error) { /* private mode */ }
+  document.querySelectorAll("#views button").forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.view === view));
+  });
+  if (state.result) {
+    renderResults();
+    $("results").scrollTop = 0;
+    window.scrollTo({ top: 0 });
+  }
+}
+
+function renderContext(result) {
+  const meta = result.meta;
+  const settings = meta.settings || {};
+  const parts = [
+    `<span><b>${escapeHtml(meta.window_start)}</b> to <b>${escapeHtml(meta.window_end)}</b> · ${escapeHtml(meta.years)} years</span>`,
+    `<span><b>${Number(meta.trading_days).toLocaleString()}</b> shared sessions</span>`,
+    `<span>${escapeHtml(result.portfolios.filter((p) => !p.is_benchmark).length)} portfolios vs <b>${escapeHtml(result.portfolios.find((p) => p.is_benchmark)?.name || "no benchmark")}</b></span>`,
+    `<span>${escapeHtml(settings.transaction_cost_bps)} bps costs</span>`,
+    `<span>${Number(settings.paths).toLocaleString()} scenarios over ${escapeHtml(settings.horizon_years)} years</span>`,
+  ];
+  $("context-bar").innerHTML = parts.join('<span class="sep"></span>');
+}
+
+function kpiStrip(result) {
+  const selected = result.portfolios.find((p) => p.name === state.selected) || result.portfolios[0];
+  const bench = result.portfolios.find((p) => p.is_benchmark && p !== selected);
+  const s = selected.summary;
+  const b = bench?.summary;
+  const tone = (value) => (value > 0 ? "gain" : value < 0 ? "loss" : "");
+  const versus = (label, value) => (b ? `${label} ${value}` : "");
+  const tiles = [
+    ["Final value", charts.money(s.final_value), versus(bench?.name || "", charts.money(b?.final_value)), ""],
+    ["Annualized return", charts.percent(s.annualized_return), versus("Benchmark", charts.percent(b?.annualized_return)),
+      b ? tone(s.annualized_return - b.annualized_return) : ""],
+    ["Volatility", charts.percent(s.volatility), versus("Benchmark", charts.percent(b?.volatility)), ""],
+    ["Sharpe", charts.ratio(s.sharpe), versus("Benchmark", charts.ratio(b?.sharpe)), b ? tone(s.sharpe - b.sharpe) : ""],
+    ["Worst drawdown", charts.percent(s.max_drawdown), versus("Benchmark", charts.percent(b?.max_drawdown)), "loss"],
+    ["Costs paid", charts.money(s.total_cost), `${escapeHtml(result.meta.settings.transaction_cost_bps)} bps per trade`, ""],
+  ];
+  const node = document.createElement("section");
+  node.className = "kpis";
+  node.setAttribute("aria-label", `Summary for ${selected.name}`);
+  node.innerHTML = `<div class="kpi-head"><span class="swatch" style="background:${seriesColor(selected)}"></span>${escapeHtml(selected.name)}<span class="faint">select another portfolio in the chart legend or table</span></div>`
+    + tiles.map(([label, value, sub, cls]) => `<div class="kpi"><div class="kpi-label">${label}</div><div class="kpi-value ${cls}">${value}</div><div class="kpi-sub">${escapeHtml(sub)}</div></div>`).join("");
+  return node;
+}
+
 function renderResults() {
   const result = state.result;
   const host = $("results");
   host.innerHTML = "";
   state.renderers = [];
+  renderContext(result);
 
   if (result.warnings?.length) {
     const flags = document.createElement("div");
@@ -662,14 +736,7 @@ function renderResults() {
     host.appendChild(flags);
   }
 
-  host.appendChild(heroPlate(result));
-  host.appendChild(metricsPlate(result));
-  host.appendChild(drawdownPlate(result));
-  host.appendChild(scenarioPlate(result));
-  const optimization = optimizationPlate(result);
-  if (optimization) host.appendChild(optimization);
-  host.appendChild(compositionPlate(result));
-  host.appendChild(assumptionsPlate(result));
+  VIEWS[state.view || "overview"](result).filter(Boolean).forEach((node) => host.appendChild(node));
 
   const observer = charts.observeResize(state.renderers);
   observer.observe(host);
@@ -1239,6 +1306,10 @@ function assumptionsPlate(result) {
 /* ----------------------------- boot ----------------------------- */
 
 async function boot() {
+  try {
+    const theme = localStorage.getItem("strata.theme");
+    if (theme) document.documentElement.setAttribute("data-theme", theme);
+  } catch (error) { /* storage unavailable: follow the system theme */ }
   await backend.ready();
   state.settings.source = backend.defaultSource;
   if (backend.bundledUniverse && backend.defaultSource === "bundled") {
@@ -1260,10 +1331,26 @@ async function boot() {
       console.warn("Ignoring an unreadable setup link:", error.message);
     }
   }
-  if (!restored) loadPreset(preset);
+  if (!restored) {
+    loadPreset(preset);
+    // The automatic first run should be instant: use the frozen dataset when it holds
+    // every symbol. The rail shows the source, and the visitor can switch to Yahoo.
+    const symbols = preset.portfolios.flatMap((p) => p.holdings.map(([ticker]) => ticker)).concat(preset.benchmark || []);
+    if (backend.autorun && backend.bundledUniverse && backend.sources.includes("bundled")
+      && symbols.every((ticker) => backend.bundledUniverse.includes(ticker))) {
+      state.settings.source = "bundled";
+      backend.universe = backend.bundledUniverse;
+    }
+  }
+  // On a phone the setup would push the results a screen away, so the detailed cards
+  // start folded; each still opens with one tap.
+  if (typeof window.matchMedia === "function" && window.matchMedia("(max-width: 960px)").matches) {
+    ["card-strategy", "card-window", "card-settings"].forEach((id) => $(id)?.setAttribute("data-open", "false"));
+  }
   bindRail();
   writeRail();
   showMode();
+  try { showView(sessionStorage.getItem("strata.view") || "overview"); } catch (error) { /* private mode */ }
   if (backend.autorun || restored) run();
 }
 

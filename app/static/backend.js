@@ -11,7 +11,8 @@
     sources: ["auto", "bundled"],
     defaultSource: "auto",
     allowsSourceChoice: true,
-    autorun: false,
+    // The first preset uses the bundled dataset, so a first visit opens on real results.
+    autorun: true,
     defaultStart: null,
     defaultEnd: null,
     supportsOptimization: true,
