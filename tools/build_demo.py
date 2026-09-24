@@ -64,9 +64,9 @@ def build() -> Path:
 
     # The demo cannot reach a price provider, so say so where the control sits.
     html = html.replace(
-        '<span class="wordmark-sub">Portfolio construction bench</span>',
-        '<span class="wordmark-sub" title="The full app fetches any ticker through Yahoo Finance '
-        'and runs the Python solvers.">Offline demo · frozen 2018–2026 data</span>',
+        "Historical backtest, block-bootstrap scenarios and walk-forward portfolio construction.",
+        "This demo runs entirely in your browser on the frozen 2018–2026 research dataset. "
+        "The full app fetches any ticker through Yahoo Finance and runs the Python solvers.",
     )
 
     DIST.mkdir(exist_ok=True)

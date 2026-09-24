@@ -11,14 +11,20 @@
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-<a class="skip-link" href="#results">Skip to results</a>
+<header class="masthead">
+  <h1 class="wordmark">Strata</h1>
+  <span class="wordmark-sub">Quantitative Investment Analytics</span>
+  <span class="lede">Historical backtest, block-bootstrap scenarios and walk-forward portfolio construction.</span>
+  <div class="tools">
+    <span class="mode" id="mode" title="Where prices come from"></span>
+    <button class="chip" id="theme-toggle" type="button" title="Switch between light and dark">Dark</button>
+    <button class="chip" id="share-setup" type="button" title="Copy a link that reproduces this exact setup">Copy link</button>
+    <button class="chip" id="export-json" type="button" title="Download every number behind this page, with its provenance">Export results</button>
+  </div>
+</header>
+
 <div class="shell">
-  <form class="rail" id="rail" autocomplete="off" aria-label="Portfolio setup">
-    <div class="brand">
-      <svg viewBox="0 0 32 32" aria-hidden="true"><rect x="0.5" y="0.5" width="31" height="31" rx="7"/><path d="M8 20.5l8 4 8-4M8 16l8 4 8-4M8 11.5l8-4 8 4-8 4z"/></svg>
-      <div><h1 class="wordmark">Strata</h1><span class="wordmark-sub">Portfolio construction bench</span></div>
-    </div>
-    <div class="rail-scroll">
+  <form class="rail" id="rail" autocomplete="off">
     <section class="card" data-open="true" id="card-portfolios">
       <header><svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v18h18"/><rect x="7" y="11" width="3" height="6"/><rect x="13" y="7" width="3" height="10"/></svg><h3>Portfolios</h3><span class="aside" id="portfolio-count"></span><svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg></header>
       <div class="card-body">
@@ -152,43 +158,23 @@
       </div>
     </section>
 
-    <span class="presets-label">Load a preset</span>
-    <div class="chips" id="presets"></div>
-    </div>
-    <div class="rail-foot">
     <button class="button primary" type="submit" id="run"><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4l13 8-13 8z"/></svg>Run analysis</button>
     <div class="run-row">
+      <button class="button" type="button" id="share-setup"><svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z"/></svg>Save preset</button>
       <button class="button" type="button" id="reset-setup"><svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>Reset</button>
     </div>
-    <div class="note" id="run-status" role="status" aria-live="polite"></div>
-    </div>
+    <div class="note" id="run-status" style="margin-top:10px"></div>
+    <span class="presets-label">Load a preset</span>
+    <div class="chips" id="presets"></div>
   </form>
 
-  <div class="workspace">
-    <header class="topbar">
-      <nav class="views" id="views" aria-label="Result views">
-        <button type="button" data-view="overview" aria-pressed="true">Overview</button>
-        <button type="button" data-view="risk" aria-pressed="false">Risk</button>
-        <button type="button" data-view="scenarios" aria-pressed="false">Scenarios</button>
-        <button type="button" data-view="construction" aria-pressed="false">Construction</button>
-        <button type="button" data-view="assumptions" aria-pressed="false">Assumptions</button>
-      </nav>
-      <div class="tools">
-        <span class="mode" id="mode" title="Where prices come from"></span>
-        <button class="icon-button" id="theme-toggle" type="button" title="Switch theme" aria-label="Switch theme"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 13A9 9 0 1 1 11 3a7 7 0 0 0 10 10z"/></svg></button>
-        <button class="chip" id="copy-link" type="button" title="Copy a link that reproduces this exact setup">Copy link</button>
-        <button class="chip" id="export-json" type="button" title="Download every number behind this page, with its provenance">Export</button>
-      </div>
-    </header>
-    <div class="context-bar" id="context-bar" aria-live="polite"></div>
-    <main class="results" id="results" tabindex="-1">
-      <div class="empty">
-        <div class="spinner" aria-hidden="true"></div>
-        <h2>Preparing the example study</h2>
-        <p class="note">Build portfolios on the left and press <b>Run analysis</b>. Results appear here as Overview, Risk, Scenarios, Construction and Assumptions.</p>
-      </div>
-    </main>
-  </div>
+  <main class="results" id="results">
+    <div class="empty">
+      <h2>Start with a few tickers</h2>
+      <p class="note">Enter the holdings and weights on the left, pick a window, and run it. You get the realized path over that window and a fan of scenarios built by resampling the portfolio's own completed returns — the same method the research pipeline uses, applied to your universe.</p>
+      <p class="note">Add a second portfolio to compare two allocations in the same simulated markets, so the difference between them comes from construction rather than a luckier draw.</p>
+    </div>
+  </main>
 </div>
 
 <script src="charts.js"></script>
